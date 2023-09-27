@@ -4,7 +4,10 @@ PROGRAM RK_Solution
 	real*8 :: t0, t_final, t, h
 	real*8, dimension(:), allocatable:: C, dCdt, Cout, kdecs_per_s, C_separate, dCdt_separate, C_equilibrium_separate
 	character(100) :: output, output1, output2, output3, output4, output5, output6
-	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, j, unit, n, last_bound
+	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, j, unit, n, last_bound, k
+	integer :: unit_K0, unit_K1, unit_K2, unit_K3, unit_K4, unit_K5, unit_K6, unit_K7, &
+	unit_K8, unit_K9, unit_K10, unit_K11, unit_K12, unit_K13, unit_K14, unit_K15, unit_K16, &
+	unit_K17, unit_K18, unit_K19, unit_K20
 	
 ! Parameters for kinetics
 	character(len=100) :: directory, filename 
@@ -13,8 +16,13 @@ PROGRAM RK_Solution
 		directory_J24_K9, directory_J24_K10, directory_J24_K11, directory_J24_K12, directory_J24_K13, directory_J24_K14, &
 		directory_J24_K15, directory_J24_K16, directory_J24_K17, directory_J24_K18, directory_J24_K19, directory_J24_K20
 	
-	character(len=200) :: filepath
-	integer :: num_states, i, ios, num_counter, num_limit
+	character(len=200) :: filepath, filepath_K0, filepath_K1, filepath_K2, filepath_K3, filepath_K4, filepath_K5, filepath_K6, &
+	filepath_K7, filepath_K8, filepath_K9, filepath_K10, filepath_K11, filepath_K12, filepath_K13, filepath_K14, filepath_K15, &
+	filepath_K16, filepath_K17, filepath_K18, filepath_K19, filepath_K20
+	
+	integer :: num_states, i, ios, num_counter, num_limit, ios_K0, ios_K1, ios_K2, ios_K3, ios_K4, ios_K5, ios_K6, ios_K7, ios_K8, &
+	ios_K9, ios_K10, ios_K11, ios_K12, ios_K13, ios_K14, ios_K15, ios_K16, ios_K17, ios_K18, ios_K19, ios_K20
+	
 	real*8, dimension(:), allocatable :: Energies, Gammas, Covalent_All, Vdw_All, Infinity_All, equilibrium_constants_m3
 	real*8, dimension(:, :), allocatable :: transition_matrix
 	real*8, dimension(:), allocatable :: First_term, Second_term, sum_rows, threshold_Energies_K
@@ -28,13 +36,18 @@ PROGRAM RK_Solution
 	real*8, dimension(2) :: dE
 	real*8 :: C_init, C_tot, dCdt_tot, K_eqs_tot, threshold_E
 	real*8 :: Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
-	real*8 :: k_rec, lower_energy_lim, upper_energy_lim, upper_gamma_lim, lower_gamma_limit
-	integer :: threshold_j, Js, Ks, vib_sym_well, iteration_counter, print_freq, K_initial, K_final
-	integer, dimension(:), allocatable :: num_states_K, K_value, threshold_j_values, Resonance, equilibrium_constants_m3_lin
+	real*8 :: k_rec, lower_energy_lim, upper_energy_lim, upper_gamma_lim, lower_gamma_lim
+	integer :: threshold_j, Js, Ks, vib_sym_well, iteration_counter, print_freq, K_initial, K_final, band_width
+	integer, dimension(:), allocatable :: num_states_K, K_value, threshold_j_values, Resonance, num_counter_K, &
+	unit_K, ios_K
 	
-	real*8 :: start_time, end_time, end_time1, end_time2, end_time3, kt_energy_j, dE_down, kstab, krec3
-	real*8, dimension(:), allocatable :: weights, kbstab
-
+	real*8 :: start_time, end_time, end_time1, end_time2, end_time3, tmp_energies, tmp_gammas, tmp_covalent_all, &
+	tmp_vdw_all, tmp_infinity_all, tmp_k_value, tmp_resonance, kt_energy_j, dE_down
+	
+	integer :: istart, ifinish
+	
+	logical :: print_detail, truncation
+	
 !---------------------------------------------------------------------------------------------------------------------------	
 	
 	call cpu_time(start_time)
@@ -74,27 +87,30 @@ PROGRAM RK_Solution
 	
 	j_per_k = get_j_per_k()
 	kt_energy_j = temp_k * j_per_k;
-
+	
 ! Energy Spectrum Parameters in wave numbers	
-	lower_energy_lim = -300
+	lower_energy_lim = -3000
 	upper_energy_lim = 300
 	upper_gamma_lim = 200
-	lower_gamma_limit = 1.d0 !10**(-2)
+	lower_gamma_lim = 1.d0 ! 10**(-2)
 
 ! Ozone isotope Labels	
 	o3_molecule = "666"
 	o2_molecule = "66"
 	o_atom = "6"
-		
+
 ! Computing k0
 	k0_m3_per_s = get_k0_2(o3_molecule, temp_k, sigma0_m2)
 
 ! Initial and final time and time step
 	t0 = 0.0d0
 ! 0.01*1000e-9 / pressure_ratio = 1e-12 in case of 10000std of M_per_m3
-	t_final = 10*0.01*1000e-9 / pressure_ratio
-	h = t_final / (100000*100) !0.001*1e-9 / (pressure_ratio)
+	t_final = 1e-13 ! 1.35*0.01*1000e-9 / pressure_ratio
+	h = t_final / (10**7) !1*1e-9 / (pressure_ratio)
+	band_width = 0
 	print_freq = 1000
+	print_detail = .False.
+	truncation = .True.
 
 ! Specify the directory and file name  
     directory_J0_K0 = "/mmfs1/home/3436yermeka/ozone_kinetics/data/resonances/mol_666/half_integers/J_0/K_0/symmetry_1"
@@ -132,7 +148,7 @@ PROGRAM RK_Solution
 	vib_sym_well = 0
 	num_states = 0
 	
-	K_initial = 20
+	K_initial = 0
 	K_final = 20
 	allocate(num_states_K(K_final+1))
 	allocate(threshold_Energies_K(K_final+1))
@@ -202,12 +218,12 @@ PROGRAM RK_Solution
 			read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
 			if (ios /= 0) exit
 			if (Energy_tmp > threshold_Energies_K(Ks+1) + lower_energy_lim .and. Energy_tmp < threshold_Energies_K(Ks+1) + upper_energy_lim &
-				.and. Total_Gamma_tmp <= upper_gamma_lim) then
+				.and. Total_Gamma_tmp <= upper_gamma_lim ) then
 				num_states = num_states + 1
 				num_states_K(Ks+1) = num_states_K(Ks+1) + 1
 			end if
 		end do
-		print *, "Number of states with K = ", Ks, "is: ", num_states_K(Ks+1)	
+		print *, "Number of states with K = ", Ks, "is: ", num_states_K(Ks+1)		
 		close(unit)
 	end do
 
@@ -217,6 +233,8 @@ PROGRAM RK_Solution
 		call cpu_time(end_time1)
 		write(*, *) "Time for the first reading:", end_time1-start_time, "seconds"
 		
+		band_width = num_states
+				
 ! Allocate arrays to store the filtered data
 	allocate(Energies(num_states))
 	allocate(Gammas(num_states))
@@ -224,144 +242,285 @@ PROGRAM RK_Solution
 	allocate(Vdw_All(num_states))
 	allocate(Infinity_All(num_states))
 	allocate(K_value(num_states))
-	
 	allocate(Resonance(num_states))
+	
+	Energies = 0
+	Gammas = 0
+	Covalent_All = 0
+	Vdw_All = 0
+	Infinity_All = 0
+	K_value = 0
 	Resonance = 0
 
-! Go through the data files again to read and store only the data we need		
-	num_counter = 1
-	num_limit = 0
-	
-	do Ks = K_initial, K_final
-		num_limit = num_limit + num_states_K(Ks+1)
+! Temporary variables for sorting	
+	tmp_energies = 0
+	tmp_gammas = 0
+	tmp_covalent_all = 0
+	tmp_vdw_all = 0
+	tmp_infinity_all = 0
+	tmp_k_value = 0
+	tmp_resonance = 0
+
+! Go through the data files again to read and store only the data we need						
+		allocate(num_counter_K(K_final+1))
+		num_counter = 1
+		num_counter_K = 1
+		allocate(unit_K(K_final+1))
+		unit_K(1) = unit_K0
+		unit_K(2) = unit_K1
+		unit_K(3) = unit_K2
+		unit_K(4) = unit_K3
+		unit_K(5) = unit_K4
 		
-		if (Ks == 0) then
-			directory = directory_J24_K0
-		else if (Ks==1) then
-			directory = directory_J24_K1
-		else if (Ks==2) then
-			directory = directory_J24_K2
-		else if (Ks==3) then
-			directory = directory_J24_K3
-		else if (Ks==4) then
-			directory = directory_J24_K4
-		else if (Ks==5) then
-			directory = directory_J24_K5
-		else if (Ks==6) then
-			directory = directory_J24_K6
-		else if (Ks==7) then
-			directory = directory_J24_K7
-		else if (Ks==8) then
-			directory = directory_J24_K8
-		else if (Ks==9) then
-			directory = directory_J24_K9
-		else if (Ks==10) then
-			directory = directory_J24_K10
-		else if (Ks==11) then
-			directory = directory_J24_K11
-		else if (Ks==12) then
-			directory = directory_J24_K12
-		else if (Ks==13) then
-			directory = directory_J24_K13
-		else if (Ks==14) then
-			directory = directory_J24_K14
-		else if (Ks==15) then
-			directory = directory_J24_K15
-		else if (Ks==16) then
-			directory = directory_J24_K16
-		else if (Ks==17) then
-			directory = directory_J24_K17
-		else if (Ks==18) then
-			directory = directory_J24_K18
-		else if (Ks==19) then
-			directory = directory_J24_K19
-		else if (Ks==20) then
-			directory = directory_J24_K20	
-		end if
-				
+		unit_K(6) = unit_K5
+		unit_K(7) = unit_K6
+		unit_K(8) = unit_K7
+		unit_K(9) = unit_K8
+		unit_K(10) = unit_K9
+		
+		unit_K(11) = unit_K10
+		unit_K(12) = unit_K11
+		unit_K(13) = unit_K12
+		unit_K(14) = unit_K13
+		unit_K(15) = unit_K14
+		
+		unit_K(16) = unit_K15
+		unit_K(17) = unit_K16
+		unit_K(18) = unit_K17
+		unit_K(19) = unit_K18
+		unit_K(20) = unit_K19
+		unit_K(21) = unit_K20
+		
+		allocate(ios_K(K_final+1))
+		ios_K(1) = ios_K0
+		ios_K(2) = ios_K1
+		ios_K(3) = ios_K2
+		ios_K(4) = ios_K3
+		ios_K(5) = ios_K4
+		
+		ios_K(6) = ios_K5
+		ios_K(7) = ios_K6
+		ios_K(8) = ios_K7
+		ios_K(9) = ios_K8
+		ios_K(10) = ios_K9
+		
+		ios_K(11) = ios_K10
+		ios_K(12) = ios_K11
+		ios_K(13) = ios_K12
+		ios_K(14) = ios_K13
+		ios_K(15) = ios_K14
+		
+		ios_K(16) = ios_K15
+		ios_K(17) = ios_K16
+		ios_K(18) = ios_K17
+		ios_K(19) = ios_K18
+		ios_K(20) = ios_K19
+		ios_K(21) = ios_K20
 ! Computes threshold energy
         !threshold_energy_j = get_higher_barrier_threshold()	
-		filepath = trim(directory) // '/' // trim(filename)
-		open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
-		read(unit, *)
+		filepath_K0 = trim(directory_J24_K0) // '/' // trim(filename)
+		filepath_K1 = trim(directory_J24_K1) // '/' // trim(filename)
+		filepath_K2 = trim(directory_J24_K2) // '/' // trim(filename)
+		filepath_K3 = trim(directory_J24_K3) // '/' // trim(filename)
+		filepath_K4 = trim(directory_J24_K4) // '/' // trim(filename)
 		
+		filepath_K5 = trim(directory_J24_K5) // '/' // trim(filename)
+		filepath_K6 = trim(directory_J24_K6) // '/' // trim(filename)
+		filepath_K7 = trim(directory_J24_K7) // '/' // trim(filename)
+		filepath_K8 = trim(directory_J24_K8) // '/' // trim(filename)
+		filepath_K9 = trim(directory_J24_K9) // '/' // trim(filename)
+		
+		filepath_K10 = trim(directory_J24_K10) // '/' // trim(filename)
+		filepath_K11 = trim(directory_J24_K11) // '/' // trim(filename)
+		filepath_K12 = trim(directory_J24_K12) // '/' // trim(filename)
+		filepath_K13 = trim(directory_J24_K13) // '/' // trim(filename)
+		filepath_K14 = trim(directory_J24_K14) // '/' // trim(filename)
+		
+		filepath_K15 = trim(directory_J24_K15) // '/' // trim(filename)
+		filepath_K16 = trim(directory_J24_K16) // '/' // trim(filename)
+		filepath_K17 = trim(directory_J24_K17) // '/' // trim(filename)
+		filepath_K18 = trim(directory_J24_K18) // '/' // trim(filename)
+		filepath_K19 = trim(directory_J24_K19) // '/' // trim(filename)
+		filepath_K20 = trim(directory_J24_K20) // '/' // trim(filename)
+		
+		open(newunit=unit_K(1), file=filepath_K0, status='old', action='read', iostat=ios_K(1))
+		read(unit_K(1), *)
+		open(newunit=unit_K(2), file=filepath_K1, status='old', action='read', iostat=ios_K(2))
+		read(unit_K(2), *)
+		open(newunit=unit_K(3), file=filepath_K2, status='old', action='read', iostat=ios_K(3))
+		read(unit_K(3), *)
+		open(newunit=unit_K(4), file=filepath_K3, status='old', action='read', iostat=ios_K(4))
+		read(unit_K(4), *)
+		open(newunit=unit_K(5), file=filepath_K4, status='old', action='read', iostat=ios_K(5))
+		read(unit_K(5), *)
+
+		open(newunit=unit_K(6), file=filepath_K5, status='old', action='read', iostat=ios_K(6))
+		read(unit_K(6), *)
+		open(newunit=unit_K(7), file=filepath_K6, status='old', action='read', iostat=ios_K(7))
+		read(unit_K(7), *)
+		open(newunit=unit_K(8), file=filepath_K7, status='old', action='read', iostat=ios_K(8))
+		read(unit_K(8), *)
+		open(newunit=unit_K(9), file=filepath_K8, status='old', action='read', iostat=ios_K(9))
+		read(unit_K(9), *)
+		open(newunit=unit_K(10), file=filepath_K9, status='old', action='read', iostat=ios_K(10))
+		read(unit_K(10), *)
+		
+		open(newunit=unit_K(11), file=filepath_K10, status='old', action='read', iostat=ios_K(11))
+		read(unit_K(11), *)
+		open(newunit=unit_K(12), file=filepath_K11, status='old', action='read', iostat=ios_K(12))
+		read(unit_K(12), *)
+		open(newunit=unit_K(13), file=filepath_K12, status='old', action='read', iostat=ios_K(13))
+		read(unit_K(13), *)
+		open(newunit=unit_K(14), file=filepath_K13, status='old', action='read', iostat=ios_K(14))
+		read(unit_K(14), *)
+		open(newunit=unit_K(15), file=filepath_K14, status='old', action='read', iostat=ios_K(15))
+		read(unit_K(15), *)
+		
+		open(newunit=unit_K(16), file=filepath_K15, status='old', action='read', iostat=ios_K(16))
+		read(unit_K(16), *)
+		open(newunit=unit_K(17), file=filepath_K16, status='old', action='read', iostat=ios_K(17))
+		read(unit_K(17), *)
+		open(newunit=unit_K(18), file=filepath_K17, status='old', action='read', iostat=ios_K(18))
+		read(unit_K(18), *)
+		open(newunit=unit_K(19), file=filepath_K18, status='old', action='read', iostat=ios_K(19))
+		read(unit_K(19), *)
+		open(newunit=unit_K(20), file=filepath_K19, status='old', action='read', iostat=ios_K(20))
+		read(unit_K(20), *)
+		open(newunit=unit_K(21), file=filepath_K20, status='old', action='read', iostat=ios_K(21))
+		read(unit_K(21), *)
+
 ! Read and store the filtered data
 		do 
-			read(unit, *, iostat=ios) Energies(num_counter), Gammas(num_counter), &
-			Covalent_All(num_counter), Vdw_All(num_counter), Infinity_All(num_counter)
-			if (ios /= 0) exit
-			if (Energies(num_counter) > threshold_Energies_K(Ks+1) + lower_energy_lim .and. &
-				Energies(num_counter) < threshold_Energies_K(Ks+1) + upper_energy_lim &
-						.and. Gammas(num_counter) <= upper_gamma_lim) then
-! Neglect Gamma if state is below threshold, otherwise call it a resonance					
-				if (Energies(num_counter) < threshold_Energies_K(Ks+1)) then
-					Gammas(num_counter) = 0
-				else 
-					Resonance(num_counter) = 1
-				end if
-				K_value(num_counter) = Ks
-				num_counter = num_counter + 1
-				if (num_counter > num_limit) go to 10
-			end if
-		end do	
-10		close(unit)
-
+			do Ks = K_initial, K_final		
+				do 
+					if (num_counter_K(Ks+1) > num_states_K(Ks+1)) exit
+					read(unit_K(Ks+1), *, iostat=ios_K(Ks+1)) Energies(num_counter), Gammas(num_counter), &
+					Covalent_All(num_counter), Vdw_All(num_counter), Infinity_All(num_counter)
+					if (Energies(num_counter) > threshold_Energies_K(Ks+1) + lower_energy_lim .and. &
+						Energies(num_counter) < threshold_Energies_K(Ks+1) + upper_energy_lim &
+								.and. Gammas(num_counter) <= upper_gamma_lim ) then
+		! Neglect Gamma if state is below threshold, otherwise call it a resonance					
+						if (Energies(num_counter) < threshold_Energies_K(Ks+1)) then
+							Gammas(num_counter) = 0
+						else 
+							Resonance(num_counter) = 1
+						end if
+						K_value(num_counter) =  Ks! Change this in the future
+						if (num_counter > 1) then
+							do k = num_counter, 2, -1
+								if (Energies(k) < Energies(k-1)) then
+									! Sorting Energies
+									tmp_energies = Energies(k)
+									Energies(k) = Energies(k-1)
+									Energies(k-1) = tmp_energies
+									! Sorting Gammas
+									tmp_gammas = Gammas(k)
+									Gammas(k) = Gammas(k-1)
+									Gammas(k-1) = tmp_gammas
+									! Sorting cov probs
+									tmp_covalent_all = Covalent_All(k)
+									Covalent_All(k) = Covalent_All(k-1)
+									Covalent_All(k-1) = tmp_covalent_all
+									! Soring vdw probs
+									tmp_vdw_all = Vdw_All(k)
+									Vdw_All(k) = Vdw_All(k-1)
+									Vdw_All(k-1) = tmp_vdw_all
+									! Sorting inf probs
+									tmp_infinity_all = Infinity_All(k)
+									Infinity_All(k) = Infinity_All(k-1)
+									Infinity_All(k-1) = tmp_infinity_all
+									! Sorting K_value array
+									tmp_k_value = K_value(k)
+									K_value(k) = K_value(k-1)
+									K_value(k-1) = tmp_k_value
+									! Sorting Resonance array
+									tmp_resonance = Resonance(k)
+									Resonance(k) = Resonance(k-1)
+									Resonance(k-1) = tmp_resonance	
+								else
+									exit
+								end if						
+							end do
+						end if
+						num_counter_K(Ks+1) = num_counter_K(Ks+1) + 1
+						num_counter = num_counter + 1
+						if (num_counter > num_states) goto 10
+						exit
+						end if
+				end do
+			end do		
 	end do
+		
+10		close(unit_K0)
+		close(unit_K1)
+		close(unit_K2)
+		close(unit_K3)
+		close(unit_K4)
+		
+		close(unit_K5)
+		close(unit_K6)
+		close(unit_K7)
+		close(unit_K8)
+		close(unit_K9)
+		
+		close(unit_K10)
+		close(unit_K11)
+		close(unit_K12)
+		close(unit_K13)
+		close(unit_K14)
 
+		close(unit_K15)
+		close(unit_K16)
+		close(unit_K17)
+		close(unit_K18)
+		close(unit_K19)
+		close(unit_K20)
+		
 	print *, "Counter over number of states:", num_counter-1
 	call cpu_time(end_time2)
-	write(*, *) "Time for the second reading:", end_time2-end_time1, "seconds"
+	write(*, *) "Time for the second reading and sorting:", end_time2-end_time1, "seconds"
 	
-! Check if the reading is okay
-	if (num_counter-1 .ne. num_states) then
-		print *, 'Error reading file, stop'
-		stop
-	end if
-	
+! Check that sorting is correct	
+	do i = 2, num_states
+		if (Energies(i) < Energies(i-1)) then
+			print *, 'error in sorting'
+		end if
+	end do
+			
 ! Loop over Ks to compute K-dependent Partition functions, Equilibrium constants and decay rates for all states
 	allocate(equilibrium_constants_m3(num_states))
 	allocate(kdecs_per_s(num_states))
-	num_counter = 1
-	num_limit = 0
-	do Ks = K_initial, K_final
-		num_limit = num_limit + num_states_K(Ks+1)	
-		J_rot_start = threshold_j_values(Ks+1)
+	!num_counter = 1
+
+	do  num_counter = 1, num_states
+		Ks = K_value(num_counter)
+		call get_threshold_energy_K(o3_molecule, o2_molecule, Ks, threshold_E, threshold_j)
+		J_rot_start = threshold_j
 		part_funcs_o2_per_m3 = calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start)
-		
-		do  
-			equilibrium_constants_m3(num_counter) = calculate_formation_decay_equilibrium(Energies(num_counter), &
-			temp_k, part_funcs_o2_per_m3, Js, Ks)
-			kdecs_per_s(num_counter) = Gammas(num_counter) * j_per_cm / hbar_js
-			num_counter = num_counter + 1
-			if (num_counter > num_limit) exit
-		end do
-		
+
+		equilibrium_constants_m3(num_counter) = calculate_formation_decay_equilibrium(Energies(num_counter), &
+		temp_k, part_funcs_o2_per_m3, Js, Ks)
+		kdecs_per_s(num_counter) = Gammas(num_counter) * j_per_cm / hbar_js
+		!num_counter = num_counter + 1
+		!if (num_counter > num_states) exit
 	end do
 	
+	output = 'spectrum_info.txt'
+	open(newunit=iunit, file=output, status='replace')
+	do j = 1, num_states
+!		if (K_value(j) == 0) then
+		write(iunit, *) j, Energies(j), Gammas(j), Js, K_value(j), Resonance(j), Covalent_All(j), &
+			Vdw_All(j), Infinity_All(j), equilibrium_constants_m3(j)
+!		end if
+	end do
+	close(iunit)
+		
 ! Sum of equilibrium constants
 	K_eqs_tot = 0
 	do  i = 1, num_states
 		K_eqs_tot = K_eqs_tot + equilibrium_constants_m3(i)
 	end do
 
-! Equilibrium concentrantion (analytic)	
-	output = 'spectrum_info.txt'
-	open(newunit=iunit, file=output, status='replace')
-	do j = 1, num_states
-		write(iunit, *) j, Energies(j), Gammas(j), Js, K_value(j), &
-				equilibrium_constants_m3(j), kdecs_per_s(j), equilibrium_constants_m3(j) * C_O_per_m3 * C_O2_per_m3, Resonance(j)
-	end do
-	close(iunit)
-
-! Finding the index of last bound states
-    !do i = 1, num_states
-	!  if (Total_Energy_j(i) > threshold_E) then
-	!	last_bound=i-1
-		!print *, last_bound
-	!	exit
-	!  end if
-    !end do
-	
 ! Compute and print transition matrix	
 	allocate(transition_matrix(num_states, num_states))
     transition_matrix = calculate_transition_matrix_unitless(Energies, Covalent_All, Vdw_All, Infinity_All, dE_down)
@@ -386,44 +545,7 @@ PROGRAM RK_Solution
 	end do
 	close(kunit)
 	
-! Weights for Lindeman mechanism
-	allocate(weights(num_states))
-	weights = 0
-	
-	do j = 1, num_states
-		if (Resonance(j) == 1) then
-			kstab = 0
-			do i = 1, num_states
-				if (Resonance(i) == 0) then
-					kstab = kstab + transition_matrix(j, i)
-				end if
-			end do
-		weights(j) = kdecs_per_s(j) / (kdecs_per_s(j) + M_per_m3*k0_m3_per_s*kstab)
-		end if
-	end do
-	
-	krec3 = 0
-	allocate(kbstab(num_states))
-	allocate(equilibrium_constants_m3_lin(num_states))
-	equilibrium_constants_m3_lin = 0
-	kbstab = 0
-		do i = 1, num_states
-			if (Resonance(i) == 0) then
-				do j = 1, num_states
-					if (Resonance(j) == 1) then
-						kbstab(i) = kbstab(i) + k0_m3_per_s * transition_matrix(j, i) *  weights(j) * equilibrium_constants_m3(j)
-						!print *, equilibrium_constants_m3(j)
-					end if
-				end do
-			krec3 = krec3 + Covalent_All(i) * kbstab(i)	
-			end if
-		end do
-		print *, krec3
-	
-	
 	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
-	
-stop
 
 ! Compute sum of rows in the transition matrix
 	allocate(sum_rows(num_states))
@@ -447,11 +569,13 @@ stop
 	allocate(dCdt(num_states))
 	
 	t = t0
-	C = 0 !2815112.505 !2996557.66 !2689773.502
+	C = 0.d0
 	
 	output1 = 'propagated_concentration.txt'
-	open(newunit=junit, file=output1, status='replace')	
-	write(junit, *) t, C 
+	open(newunit=junit, file=output1, status='replace')
+	if (print_detail .eqv. .True.) then
+		write(junit, *) t, C
+	end if
 	
 	iteration_counter = 0
 
@@ -473,18 +597,18 @@ stop
 	C_separate = 0
 	C_equilibrium_separate = 0
 	  	  
-! Professor's method of separate sum over K blocks			 
-	do i = 1, num_states
-		dCdt_separate(K_value(i) + 1) = dCdt_separate(K_value(i) + 1) + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
-		C_separate(K_value(i) + 1) = C_separate(K_value(i) + 1) + C(i)
-		C_equilibrium_separate(K_value(i) + 1) = C_equilibrium_separate(K_value(i) + 1) + &
-			equilibrium_constants_m3(i) * C_O_per_m3 * C_O2_per_m3
-	end do
+! Professor's method of separate sum over K blocks		 
+		do i = 1, num_states
+				dCdt_separate(K_value(i) + 1) = dCdt_separate(K_value(i) + 1) + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
+				C_separate(K_value(i) + 1) = C_separate(K_value(i) + 1) + C(i)
+				C_equilibrium_separate(K_value(i) + 1) = C_equilibrium_separate(K_value(i) + 1) + &
+					equilibrium_constants_m3(i) * C_O_per_m3 * C_O2_per_m3
+		end do
 		
 	output3 = 'recombination_coefficient_and_dCdt_tot.txt'
 	open(newunit=nunit, file=output3, status='replace')
 	write(nunit, *) t, k_rec, dCdt_tot, dCdt_separate
-	
+		
 	output4 = 'total_concentrations.txt'
 	open(newunit=munit, file=output4, status='replace')
 	write(munit, *) t, C_tot, C_separate
@@ -502,9 +626,7 @@ stop
 	close(bunit)
 	
 	call cpu_time(end_time3)
-	write(*, *) "All parameters before main propagation loop:", end_time3-end_time2, "seconds"
-
-stop
+	write(*, *) "All parameters before main propagation loop:", end_time3-end_time2, "seconds"	
 
 !  The main time-propogation loop
 	allocate(Cout(num_states))
@@ -518,7 +640,9 @@ stop
 			  
 ! Processing and printing of the results: Total dCdt and krec
 			  if (mod(iteration_counter, print_freq) == 0) then			  
-				  write(junit, *) t, C	
+				  if (print_detail .eqv. .True.) then
+					write(junit, *) t, C
+				  end if
 				  
 				  C_tot = 0
 				  dCdt_tot = 0
@@ -531,19 +655,21 @@ stop
 ! Separate derivatives over K blocks after propagation 	  
 				  dCdt_separate = 0
 			      C_separate = 0			 				  
-! Professor's method of separate sum over K blocks			 
+! Professor's method of separate sum over K blocks
 				  do i = 1, num_states
 					 dCdt_separate(K_value(i) + 1) = dCdt_separate(K_value(i) + 1) + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
 					 C_separate(K_value(i) + 1) = C_separate(K_value(i) + 1) + C(i)
-				  end do				  
+				  end do
 				  
 				  write(nunit, *) t, k_rec, dCdt_tot, dCdt_separate
 				  write(munit, *) t, C_tot, C_separate
 				  flush(nunit)
 				  flush(munit)
 			  end if
+	
 	end do
 	
+	close(junit)
 	close(nunit)
 	close(munit)
 	
@@ -551,7 +677,7 @@ stop
 	write(*, *) "CPU Time:", end_time-start_time, "seconds"
 
 ! Main part of the code ends here
-!------------------------------------------------------------------------------------------------------------------------------
+!-------------------------------------------------------------------------------------------------------------
 	
 	contains
 		 	
@@ -563,10 +689,20 @@ stop
 ! Calculate the derivatives dC/dt
 		do i = 1, num_states
 ! calculate sum for individual state - Third_term		
-			Third_term = 0 ! Initialize Third_term for this state
-				do j = 1, num_states
+			Third_term = 0 ! Initialize Third_term for this state	
+				
+				if (truncation .eqv. .False.) then
+					do j = 1, num_states 
 						Third_term = Third_term + transition_matrix(j, i) * C(j)
-				end do		
+					end do
+				else
+					istart = max(1, i-band_width/2)
+					ifinish = min(i+band_width/2, num_states)
+					do j = istart, ifinish 
+						Third_term = Third_term + transition_matrix(j, i) * C(j)
+					end do
+				end if
+								
 			dCdt(i) = First_term(i) - Second_term(i)*C(i) + Third_term
 		end do
 			!dCdt = First_term - kdecs_per_s*C + MATMUL(modified_transition_matrix_per_s_transposed, C)
@@ -625,25 +761,18 @@ stop
 		
 		do j = 1, size(matrix, 2)
 		   do i = 1, j-1
-			  ptran = Cov(i)*Cov(j) + Vdw(i)*Vdw(j)! + Inf(i)*Inf(j)
+			  ptran = Cov(i)*Cov(j) + Vdw(i)*Vdw(j) + Inf(i)*Inf(j)
 			  dE_up = get_dE_up(dE_down, temp_k, Energies(i), Energies(j), equilibrium_constants_m3(i), equilibrium_constants_m3(j))
 			  if (Energies(j) > Energies(i)) then
-!				matrix(i, j) = ptran * equilibrium_constants_m3(i)/equilibrium_constants_m3(j)/&
-!				exp((Energies(j) - Energies(i)) * j_per_cm /kt_energy_j)*exp((Energies(i) - Energies(j)) * j_per_cm / dE_j(2))
-!				matrix(j, i) = ptran * equilibrium_constants_m3(i)/equilibrium_constants_m3(j)/&
-!				exp((Energies(j) - Energies(i)) * j_per_cm /kt_energy_j)* exp((Energies(j) - Energies(i)) * j_per_cm / dE_j(1))			  
 				matrix(i, j) = ptran * exp((Energies(i) - Energies(j)) / dE_up)
 				matrix(j, i) = ptran * exp((Energies(j) - Energies(i)) / dE_down)
 			  else if (Energies(j) < Energies(i)) then
-!				matrix(i, j) = ptran * equilibrium_constants_m3(i)/equilibrium_constants_m3(j)/&
-!				exp((Energies(j) - Energies(i)) * j_per_cm /kt_energy_j)*exp((Energies(i) - Energies(j)) * j_per_cm / dE_j(1))
-!				matrix(j, i) = ptran * equilibrium_constants_m3(i)/equilibrium_constants_m3(j)/&
-!				exp((Energies(j) - Energies(i)) * j_per_cm /kt_energy_j)*exp((Energies(j) - Energies(i)) * j_per_cm / dE_j(2))			  
 				matrix(i, j) = ptran * exp((Energies(i) - Energies(j)) / dE_down)
 				matrix(j, i) = ptran * exp((Energies(j) - Energies(i)) / dE_up)
 			  end if 
 		   end do
 		end do
+	
 	end function calculate_transition_matrix_unitless
 	   
 	subroutine readFWCFile(filepath, Energy_per_cm, Total_Gamma_per_cm, Covalent_All, Vdw_all, Infty, A_per_cm, &
@@ -753,7 +882,7 @@ stop
 	
 	function get_dE_up(dE_down, temp_k, Energy_i, Energy_j, K_eq_i, K_eq_j) result(dE_up)
 ! Calculates dE_up corresponding to dE_down to satisfy the reversibility principle
-		real*8, intent(in) :: dE_down, temp_k, Energy_i, Energy_j, K_eq_i, K_eq_j
+		real*8, intent(in) :: dE_down, temp_k, Energy_i, Energy_j, K_eq_i, K_eq_j 
 		real*8 :: j_per_k, kt_energy_j, dE_up
 
 		j_per_k = get_j_per_k()
