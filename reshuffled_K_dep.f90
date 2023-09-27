@@ -1,4 +1,4 @@
-PROGRAM RK_Solution !Adil
+PROGRAM RK_Solution
 ! Solve the differential equation dC/dt = ..  using rk4 subroutine
 	implicit none
 	real*8 :: t0, t_final, t, h
@@ -89,8 +89,8 @@ PROGRAM RK_Solution !Adil
 	kt_energy_j = temp_k * j_per_k;
 	
 ! Energy Spectrum Parameters in wave numbers	
-	lower_energy_lim = -3000
-	upper_energy_lim = 300
+	lower_energy_lim = -100
+	upper_energy_lim = 10
 	upper_gamma_lim = 200
 	lower_gamma_lim = 1.d0 ! 10**(-2)
 
@@ -110,7 +110,7 @@ PROGRAM RK_Solution !Adil
 	band_width = 10
 	print_freq = 1000
 	print_detail = .False.
-	truncation = .True.
+	truncation = .False.
 
 ! Specify the directory and file name  
     directory_J0_K0 = "/mmfs1/home/3436yermeka/ozone_kinetics/data/resonances/mol_666/half_integers/J_0/K_0/symmetry_1"
