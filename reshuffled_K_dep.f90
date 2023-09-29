@@ -1,8 +1,8 @@
-PROGRAM RK_Solution !Adil
+PROGRAM RK_Solution
 ! Solve the differential equation dC/dt = ..  using rk4 subroutine
 	implicit none
 	real*8 :: t0, t_final, t, h
-	real*8, dimension(:), allocatable:: C, dCdt, Cout, kdecs_per_s, C_separate, dCdt_separate, C_equilibrium_separate
+	real*8, dimension(:), allocatable:: C, dCdt, Cout, kdecs_per_s, C_separate, dCdt_separate, C_equilibrium_separate, part_funcs
 	character(100) :: output, output1, output2, output3, output4, output5, output6
 	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, j, unit, n, last_bound, k
 	integer :: unit_K0, unit_K1, unit_K2, unit_K3, unit_K4, unit_K5, unit_K6, unit_K7, &
@@ -44,7 +44,7 @@ PROGRAM RK_Solution !Adil
 	real*8 :: start_time, end_time, end_time1, end_time2, end_time3, tmp_energies, tmp_gammas, tmp_covalent_all, &
 	tmp_vdw_all, tmp_infinity_all, tmp_k_value, tmp_resonance, kt_energy_j, dE_down
 	
-	integer :: istart, ifinish
+	integer :: istart, ifinish, Ks_indep
 	
 	logical :: print_detail, truncation
 	
@@ -105,12 +105,12 @@ PROGRAM RK_Solution !Adil
 ! Initial and final time and time step
 	t0 = 0.0d0
 ! 0.01*1000e-9 / pressure_ratio = 1e-12 in case of 10000std of M_per_m3
-	t_final = 1e-13 ! 1.35*0.01*1000e-9 / pressure_ratio
-	h = t_final / (10**7) !1*1e-9 / (pressure_ratio)
-	band_width = 0
-	print_freq = 1000
-	print_detail = .False.
-	truncation = .True.
+	t_final = 1.35e-13 !1.35*0.01*1000e-9 / pressure_ratio
+	h = 100e-19 !1*1e-9 / (pressure_ratio)
+	band_width = 10
+	print_freq = 10
+	print_detail = .True.
+	truncation = .False.
 
 ! Specify the directory and file name  
     directory_J0_K0 = "/mmfs1/home/3436yermeka/ozone_kinetics/data/resonances/mol_666/half_integers/J_0/K_0/symmetry_1"
@@ -232,8 +232,6 @@ PROGRAM RK_Solution !Adil
 		
 		call cpu_time(end_time1)
 		write(*, *) "Time for the first reading:", end_time1-start_time, "seconds"
-		
-		band_width = num_states
 				
 ! Allocate arrays to store the filtered data
 	allocate(Energies(num_states))
@@ -494,9 +492,10 @@ PROGRAM RK_Solution !Adil
 
 	do  num_counter = 1, num_states
 		Ks = K_value(num_counter)
-		call get_threshold_energy_K(o3_molecule, o2_molecule, Ks, threshold_E, threshold_j)
+		Ks_indep = 0
+		call get_threshold_energy_K(o3_molecule, o2_molecule, Ks_indep, threshold_E, threshold_j)
 		J_rot_start = threshold_j
-		part_funcs_o2_per_m3 = calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start)
+		part_funcs_o2_per_m3 = calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start, Ks)
 
 		equilibrium_constants_m3(num_counter) = calculate_formation_decay_equilibrium(Energies(num_counter), &
 		temp_k, part_funcs_o2_per_m3, Js, Ks)
@@ -598,12 +597,21 @@ PROGRAM RK_Solution !Adil
 	C_equilibrium_separate = 0
 	  	  
 ! Professor's method of separate sum over K blocks		 
-		do i = 1, num_states
-				dCdt_separate(K_value(i) + 1) = dCdt_separate(K_value(i) + 1) + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
-				C_separate(K_value(i) + 1) = C_separate(K_value(i) + 1) + C(i)
-				C_equilibrium_separate(K_value(i) + 1) = C_equilibrium_separate(K_value(i) + 1) + &
-					equilibrium_constants_m3(i) * C_O_per_m3 * C_O2_per_m3
-		end do
+	do i = 1, num_states
+			dCdt_separate(K_value(i) + 1) = dCdt_separate(K_value(i) + 1) + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
+			C_separate(K_value(i) + 1) = C_separate(K_value(i) + 1) + C(i)
+			C_equilibrium_separate(K_value(i) + 1) = C_equilibrium_separate(K_value(i) + 1) + &
+				equilibrium_constants_m3(i) * C_O_per_m3 * C_O2_per_m3
+	end do
+	
+	allocate(part_funcs(K_final + 1))
+	part_funcs = 0
+	do Ks = K_initial, K_final
+			Ks_indep = 0
+			call get_threshold_energy_K(o3_molecule, o2_molecule, Ks_indep, threshold_E, threshold_j)
+			J_rot_start = threshold_j
+			part_funcs(Ks + 1) = calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start, Ks)
+	end do
 		
 	output3 = 'recombination_coefficient_and_dCdt_tot.txt'
 	open(newunit=nunit, file=output3, status='replace')
@@ -622,7 +630,7 @@ PROGRAM RK_Solution !Adil
 	output6 = 'equilibrium_concentrations_in_K_blocks'
 	open(newunit=bunit, file=output6, status='replace')
 	write(bunit, *) h, 1, C_equilibrium_separate
-	write(bunit, *) t_final, 1, C_equilibrium_separate
+	write(bunit, *) t_final, 1, part_funcs
 	close(bunit)
 	
 	call cpu_time(end_time3)
@@ -925,15 +933,18 @@ PROGRAM RK_Solution !Adil
 		pfunc = 1.0 / (1.0 - exp(-2.0 * zpe_j / kt_energy_j))
 	end function calc_part_func_O2_per_m3_vib
 	
-	function calc_part_func_O2_per_m3_rot(mu_rot_kg, J_start, J_step, kt_energy_j) result(pfunc)
+	function calc_part_func_O2_per_m3_rot(mu_rot_kg, J_start, J_step, kt_energy_j, K) result(pfunc)
 ! mu_rot_kg - reduced mass of the O2 system
 		integer, intent(in) :: J_start, J_step
 		real*8, intent(in) :: mu_rot_kg, kt_energy_j
-		real*8 :: eps, I_kg_m2, threshold_energy_j, energy_j, new_pfunc, pfunc
-		integer :: J
+		real*8 :: eps, I_kg_m2, threshold_energy_j, energy_j, new_pfunc, pfunc, threshold_E
+		integer :: J, threshold_j, K
 		eps = 1e-10
 		I_kg_m2 = get_inertia_moment(mu_rot_kg)
-		threshold_energy_j = rigid_rotor_energy(J_start, I_kg_m2)
+!		threshold_energy_j = rigid_rotor_energy(J_start, I_kg_m2)
+		call get_threshold_energy_K(o3_molecule, o2_molecule, K, threshold_E, threshold_j)
+		threshold_energy_j = threshold_E * j_per_cm
+		
 		pfunc = 0.0
 		J = J_start
 		do while (.true.)
@@ -989,25 +1000,25 @@ PROGRAM RK_Solution !Adil
 		pfunc = de_broglie_wl**(-3)
 	end function calc_part_func_O2_per_m3_trans
 						
-	function calc_part_func_O2_per_m3_total(temp_k, zpe_j, mu_rot_kg, J_rot_start, J_rot_step, mu_trans_kg) result(pfunc)
+	function calc_part_func_O2_per_m3_total(temp_k, zpe_j, mu_rot_kg, J_rot_start, J_rot_step, mu_trans_kg, K) result(pfunc)
 ! Calculates the overall partition function of O+O2 system
 		real*8 :: temp_k, zpe_j, mu_rot_kg, mu_trans_kg
 		real*8 :: j_per_k, kt_energy_j, pfunc_elec, pfunc_vib, pfunc_rot, pfunc_trans, pfunc
-		integer J_rot_start, J_rot_step
+		integer J_rot_start, J_rot_step, K
 		j_per_k = get_j_per_k()
 		kt_energy_j = temp_k * j_per_k
 		pfunc_elec = calc_part_func_O2_per_m3_elec(temp_k)
 		pfunc_vib = calc_part_func_O2_per_m3_vib(zpe_j, kt_energy_j)
-		pfunc_rot = calc_part_func_O2_per_m3_rot(mu_rot_kg, J_rot_start, J_rot_step, kt_energy_j)
+		pfunc_rot = calc_part_func_O2_per_m3_rot(mu_rot_kg, J_rot_start, J_rot_step, kt_energy_j, K)
 		pfunc_trans = calc_part_func_O2_per_m3_trans(mu_trans_kg, kt_energy_j)
 		pfunc = pfunc_elec * pfunc_vib * pfunc_rot * pfunc_trans
 	end function calc_part_func_O2_per_m3_total
 	
-	function calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start) result(pfunc_m_3)
+	function calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start, K) result(pfunc_m_3)
 		real*8 :: temp_k, pfunc_m_3
 		character(len=*), intent(in) :: o2_molecule, o_atom
 		real*8 :: zpe_j, mu_rot_kg, mu_trans_kg
-		integer J_rot_start, J_rot_step
+		integer J_rot_start, J_rot_step, K
 		
 		zpe_j = get_channel_zpe(o2_molecule)
 		mu_rot_kg = get_mu_rot(o2_molecule)
@@ -1018,7 +1029,7 @@ PROGRAM RK_Solution !Adil
 			J_rot_step = 1
 		end if
 		
-		pfunc_m_3 = calc_part_func_O2_per_m3_total(temp_k, zpe_j, mu_rot_kg, J_rot_start, J_rot_step, mu_trans_kg)
+		pfunc_m_3 = calc_part_func_O2_per_m3_total(temp_k, zpe_j, mu_rot_kg, J_rot_start, J_rot_step, mu_trans_kg, K)
 	end function calc_part_func_O2_per_m3_total_mol
 	
 	function is_monoisotopic(molecule) result(res)
