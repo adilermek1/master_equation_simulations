@@ -3,8 +3,8 @@ PROGRAM RK_Solution
 	implicit none
 	real*8 :: t0, t_final, t, h
 	real*8, dimension(:), allocatable:: C, dCdt, Cout, kdecs_per_s, C_separate, dCdt_separate, C_equilibrium_separate, part_funcs
-	character(100) :: output, output1, output2, output3, output4, output5, output6
-	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, j, unit, n, last_bound, k
+	character(100) :: output, output1, output2, output3, output4, output5, output6, output7
+	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, cunit, j, unit, n, last_bound, k
 	integer :: unit_K0, unit_K1, unit_K2, unit_K3, unit_K4, unit_K5, unit_K6, unit_K7, &
 	unit_K8, unit_K9, unit_K10, unit_K11, unit_K12, unit_K13, unit_K14, unit_K15, unit_K16, &
 	unit_K17, unit_K18, unit_K19, unit_K20
@@ -42,11 +42,11 @@ PROGRAM RK_Solution
 	unit_K, ios_K
 	
 	real*8 :: start_time, end_time, end_time1, end_time2, end_time3, tmp_energies, tmp_gammas, tmp_covalent_all, &
-	tmp_vdw_all, tmp_infinity_all, tmp_k_value, tmp_resonance, kt_energy_j, dE_down
+	tmp_vdw_all, tmp_infinity_all, tmp_k_value, tmp_resonance, kt_energy_j, dE_down, kij_min
 	
-	integer :: istart, ifinish, Ks_indep
+	integer :: istart, ifinish, Ks_indep, cutoff_count, cutoff_count_max
 	
-	logical :: print_detail, truncation
+	logical :: print_detail, truncation, K_dependent
 	
 !---------------------------------------------------------------------------------------------------------------------------	
 	
@@ -111,6 +111,7 @@ PROGRAM RK_Solution
 	print_freq = 10
 	print_detail = .True.
 	truncation = .False.
+	K_dependent = .False.
 
 ! Specify the directory and file name  
     directory_J0_K0 = "/mmfs1/home/3436yermeka/ozone_kinetics/data/resonances/mol_666/half_integers/J_0/K_0/symmetry_1"
@@ -149,7 +150,7 @@ PROGRAM RK_Solution
 	num_states = 0
 	
 	K_initial = 0
-	K_final = 20
+	K_final = 0
 	allocate(num_states_K(K_final+1))
 	allocate(threshold_Energies_K(K_final+1))
 	allocate(threshold_j_values(K_final+1))
@@ -232,7 +233,7 @@ PROGRAM RK_Solution
 		
 		call cpu_time(end_time1)
 		write(*, *) "Time for the first reading:", end_time1-start_time, "seconds"
-				
+		
 ! Allocate arrays to store the filtered data
 	allocate(Energies(num_states))
 	allocate(Gammas(num_states))
@@ -265,55 +266,55 @@ PROGRAM RK_Solution
 		num_counter_K = 1
 		allocate(unit_K(K_final+1))
 		unit_K(1) = unit_K0
-		unit_K(2) = unit_K1
-		unit_K(3) = unit_K2
-		unit_K(4) = unit_K3
-		unit_K(5) = unit_K4
-		
-		unit_K(6) = unit_K5
-		unit_K(7) = unit_K6
-		unit_K(8) = unit_K7
-		unit_K(9) = unit_K8
-		unit_K(10) = unit_K9
-		
-		unit_K(11) = unit_K10
-		unit_K(12) = unit_K11
-		unit_K(13) = unit_K12
-		unit_K(14) = unit_K13
-		unit_K(15) = unit_K14
-		
-		unit_K(16) = unit_K15
-		unit_K(17) = unit_K16
-		unit_K(18) = unit_K17
-		unit_K(19) = unit_K18
-		unit_K(20) = unit_K19
-		unit_K(21) = unit_K20
+!		unit_K(2) = unit_K1
+!		unit_K(3) = unit_K2
+!		unit_K(4) = unit_K3
+!		unit_K(5) = unit_K4
+!		
+!		unit_K(6) = unit_K5
+!		unit_K(7) = unit_K6
+!		unit_K(8) = unit_K7
+!		unit_K(9) = unit_K8
+!		unit_K(10) = unit_K9
+!		
+!		unit_K(11) = unit_K10
+!		unit_K(12) = unit_K11
+!		unit_K(13) = unit_K12
+!		unit_K(14) = unit_K13
+!		unit_K(15) = unit_K14
+!		
+!		unit_K(16) = unit_K15
+!		unit_K(17) = unit_K16
+!		unit_K(18) = unit_K17
+!		unit_K(19) = unit_K18
+!		unit_K(20) = unit_K19
+!		unit_K(21) = unit_K20
 		
 		allocate(ios_K(K_final+1))
 		ios_K(1) = ios_K0
-		ios_K(2) = ios_K1
-		ios_K(3) = ios_K2
-		ios_K(4) = ios_K3
-		ios_K(5) = ios_K4
-		
-		ios_K(6) = ios_K5
-		ios_K(7) = ios_K6
-		ios_K(8) = ios_K7
-		ios_K(9) = ios_K8
-		ios_K(10) = ios_K9
-		
-		ios_K(11) = ios_K10
-		ios_K(12) = ios_K11
-		ios_K(13) = ios_K12
-		ios_K(14) = ios_K13
-		ios_K(15) = ios_K14
-		
-		ios_K(16) = ios_K15
-		ios_K(17) = ios_K16
-		ios_K(18) = ios_K17
-		ios_K(19) = ios_K18
-		ios_K(20) = ios_K19
-		ios_K(21) = ios_K20
+!		ios_K(2) = ios_K1
+!		ios_K(3) = ios_K2
+!		ios_K(4) = ios_K3
+!		ios_K(5) = ios_K4
+!		
+!		ios_K(6) = ios_K5
+!		ios_K(7) = ios_K6
+!		ios_K(8) = ios_K7
+!		ios_K(9) = ios_K8
+!		ios_K(10) = ios_K9
+!		
+!		ios_K(11) = ios_K10
+!		ios_K(12) = ios_K11
+!		ios_K(13) = ios_K12
+!		ios_K(14) = ios_K13
+!		ios_K(15) = ios_K14
+!		
+!		ios_K(16) = ios_K15
+!		ios_K(17) = ios_K16
+!		ios_K(18) = ios_K17
+!		ios_K(19) = ios_K18
+!		ios_K(20) = ios_K19
+!		ios_K(21) = ios_K20
 ! Computes threshold energy
         !threshold_energy_j = get_higher_barrier_threshold()	
 		filepath_K0 = trim(directory_J24_K0) // '/' // trim(filename)
@@ -343,49 +344,49 @@ PROGRAM RK_Solution
 		
 		open(newunit=unit_K(1), file=filepath_K0, status='old', action='read', iostat=ios_K(1))
 		read(unit_K(1), *)
-		open(newunit=unit_K(2), file=filepath_K1, status='old', action='read', iostat=ios_K(2))
-		read(unit_K(2), *)
-		open(newunit=unit_K(3), file=filepath_K2, status='old', action='read', iostat=ios_K(3))
-		read(unit_K(3), *)
-		open(newunit=unit_K(4), file=filepath_K3, status='old', action='read', iostat=ios_K(4))
-		read(unit_K(4), *)
-		open(newunit=unit_K(5), file=filepath_K4, status='old', action='read', iostat=ios_K(5))
-		read(unit_K(5), *)
-
-		open(newunit=unit_K(6), file=filepath_K5, status='old', action='read', iostat=ios_K(6))
-		read(unit_K(6), *)
-		open(newunit=unit_K(7), file=filepath_K6, status='old', action='read', iostat=ios_K(7))
-		read(unit_K(7), *)
-		open(newunit=unit_K(8), file=filepath_K7, status='old', action='read', iostat=ios_K(8))
-		read(unit_K(8), *)
-		open(newunit=unit_K(9), file=filepath_K8, status='old', action='read', iostat=ios_K(9))
-		read(unit_K(9), *)
-		open(newunit=unit_K(10), file=filepath_K9, status='old', action='read', iostat=ios_K(10))
-		read(unit_K(10), *)
-		
-		open(newunit=unit_K(11), file=filepath_K10, status='old', action='read', iostat=ios_K(11))
-		read(unit_K(11), *)
-		open(newunit=unit_K(12), file=filepath_K11, status='old', action='read', iostat=ios_K(12))
-		read(unit_K(12), *)
-		open(newunit=unit_K(13), file=filepath_K12, status='old', action='read', iostat=ios_K(13))
-		read(unit_K(13), *)
-		open(newunit=unit_K(14), file=filepath_K13, status='old', action='read', iostat=ios_K(14))
-		read(unit_K(14), *)
-		open(newunit=unit_K(15), file=filepath_K14, status='old', action='read', iostat=ios_K(15))
-		read(unit_K(15), *)
-		
-		open(newunit=unit_K(16), file=filepath_K15, status='old', action='read', iostat=ios_K(16))
-		read(unit_K(16), *)
-		open(newunit=unit_K(17), file=filepath_K16, status='old', action='read', iostat=ios_K(17))
-		read(unit_K(17), *)
-		open(newunit=unit_K(18), file=filepath_K17, status='old', action='read', iostat=ios_K(18))
-		read(unit_K(18), *)
-		open(newunit=unit_K(19), file=filepath_K18, status='old', action='read', iostat=ios_K(19))
-		read(unit_K(19), *)
-		open(newunit=unit_K(20), file=filepath_K19, status='old', action='read', iostat=ios_K(20))
-		read(unit_K(20), *)
-		open(newunit=unit_K(21), file=filepath_K20, status='old', action='read', iostat=ios_K(21))
-		read(unit_K(21), *)
+!		open(newunit=unit_K(2), file=filepath_K1, status='old', action='read', iostat=ios_K(2))
+!		read(unit_K(2), *)
+!		open(newunit=unit_K(3), file=filepath_K2, status='old', action='read', iostat=ios_K(3))
+!		read(unit_K(3), *)
+!		open(newunit=unit_K(4), file=filepath_K3, status='old', action='read', iostat=ios_K(4))
+!		read(unit_K(4), *)
+!		open(newunit=unit_K(5), file=filepath_K4, status='old', action='read', iostat=ios_K(5))
+!		read(unit_K(5), *)
+!
+!		open(newunit=unit_K(6), file=filepath_K5, status='old', action='read', iostat=ios_K(6))
+!		read(unit_K(6), *)
+!		open(newunit=unit_K(7), file=filepath_K6, status='old', action='read', iostat=ios_K(7))
+!		read(unit_K(7), *)
+!		open(newunit=unit_K(8), file=filepath_K7, status='old', action='read', iostat=ios_K(8))
+!		read(unit_K(8), *)
+!		open(newunit=unit_K(9), file=filepath_K8, status='old', action='read', iostat=ios_K(9))
+!		read(unit_K(9), *)
+!		open(newunit=unit_K(10), file=filepath_K9, status='old', action='read', iostat=ios_K(10))
+!		read(unit_K(10), *)
+!		
+!		open(newunit=unit_K(11), file=filepath_K10, status='old', action='read', iostat=ios_K(11))
+!		read(unit_K(11), *)
+!		open(newunit=unit_K(12), file=filepath_K11, status='old', action='read', iostat=ios_K(12))
+!		read(unit_K(12), *)
+!		open(newunit=unit_K(13), file=filepath_K12, status='old', action='read', iostat=ios_K(13))
+!		read(unit_K(13), *)
+!		open(newunit=unit_K(14), file=filepath_K13, status='old', action='read', iostat=ios_K(14))
+!		read(unit_K(14), *)
+!		open(newunit=unit_K(15), file=filepath_K14, status='old', action='read', iostat=ios_K(15))
+!		read(unit_K(15), *)
+!		
+!		open(newunit=unit_K(16), file=filepath_K15, status='old', action='read', iostat=ios_K(16))
+!		read(unit_K(16), *)
+!		open(newunit=unit_K(17), file=filepath_K16, status='old', action='read', iostat=ios_K(17))
+!		read(unit_K(17), *)
+!		open(newunit=unit_K(18), file=filepath_K17, status='old', action='read', iostat=ios_K(18))
+!		read(unit_K(18), *)
+!		open(newunit=unit_K(19), file=filepath_K18, status='old', action='read', iostat=ios_K(19))
+!		read(unit_K(19), *)
+!		open(newunit=unit_K(20), file=filepath_K19, status='old', action='read', iostat=ios_K(20))
+!		read(unit_K(20), *)
+!		open(newunit=unit_K(21), file=filepath_K20, status='old', action='read', iostat=ios_K(21))
+!		read(unit_K(21), *)
 
 ! Read and store the filtered data
 		do 
@@ -450,29 +451,29 @@ PROGRAM RK_Solution
 	end do
 		
 10		close(unit_K0)
-		close(unit_K1)
-		close(unit_K2)
-		close(unit_K3)
-		close(unit_K4)
-		
-		close(unit_K5)
-		close(unit_K6)
-		close(unit_K7)
-		close(unit_K8)
-		close(unit_K9)
-		
-		close(unit_K10)
-		close(unit_K11)
-		close(unit_K12)
-		close(unit_K13)
-		close(unit_K14)
-
-		close(unit_K15)
-		close(unit_K16)
-		close(unit_K17)
-		close(unit_K18)
-		close(unit_K19)
-		close(unit_K20)
+!		close(unit_K1)
+!		close(unit_K2)
+!		close(unit_K3)
+!		close(unit_K4)
+!		
+!		close(unit_K5)
+!		close(unit_K6)
+!		close(unit_K7)
+!		close(unit_K8)
+!		close(unit_K9)
+!		
+!		close(unit_K10)
+!		close(unit_K11)
+!		close(unit_K12)
+!		close(unit_K13)
+!		close(unit_K14)
+!
+!		close(unit_K15)
+!		close(unit_K16)
+!		close(unit_K17)
+!		close(unit_K18)
+!		close(unit_K19)
+!		close(unit_K20)
 		
 	print *, "Counter over number of states:", num_counter-1
 	call cpu_time(end_time2)
@@ -492,7 +493,11 @@ PROGRAM RK_Solution
 
 	do  num_counter = 1, num_states
 		Ks = K_value(num_counter)
-		Ks_indep = 0
+		if (K_dependent .eqv. .False.) then
+			Ks_indep = 0
+		else
+			Ks_indep = Ks
+		end if
 		call get_threshold_energy_K(o3_molecule, o2_molecule, Ks_indep, threshold_E, threshold_j)
 		J_rot_start = threshold_j
 		part_funcs_o2_per_m3 = calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start, Ks)
@@ -543,6 +548,24 @@ PROGRAM RK_Solution
 		write (kunit, *)
 	end do
 	close(kunit)
+
+! Counting the elements which are greater than cuttoff value in the transition matrix
+	output7 = 'cuttoff_count_numbers.txt'
+	cutoff_count_max = 0
+	kij_min = 0.01
+	do i = 1, size(transition_matrix, 1)
+	  cutoff_count = 0
+		do j = 1, size(transition_matrix, 2)
+		 if (transition_matrix(i, j) .gt. kij_min) cutoff_count = cutoff_count + 1
+		end do
+		write (cunit, *) i, cutoff_count
+		
+		if (cutoff_count .gt. cutoff_count_max) cutoff_count_max = cutoff_count
+	end do	
+	write (cunit, *) cutoff_count_max
+	close(cunit)
+	
+	stop 
 	
 	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
 
@@ -604,13 +627,18 @@ PROGRAM RK_Solution
 				equilibrium_constants_m3(i) * C_O_per_m3 * C_O2_per_m3
 	end do
 	
+! Printing partition functions of O+O2 system in K blocks	
 	allocate(part_funcs(K_final + 1))
 	part_funcs = 0
 	do Ks = K_initial, K_final
+		if (K_dependent .eqv. .False.) then
 			Ks_indep = 0
-			call get_threshold_energy_K(o3_molecule, o2_molecule, Ks_indep, threshold_E, threshold_j)
-			J_rot_start = threshold_j
-			part_funcs(Ks + 1) = calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start, Ks)
+		else 
+			Ks_indep = Ks
+		end if
+		call get_threshold_energy_K(o3_molecule, o2_molecule, Ks_indep, threshold_E, threshold_j)
+		J_rot_start = threshold_j
+		part_funcs(Ks + 1) = calc_part_func_O2_per_m3_total_mol(temp_k, o2_molecule, o_atom, J_rot_start, Ks)
 	end do
 		
 	output3 = 'recombination_coefficient_and_dCdt_tot.txt'
@@ -635,7 +663,7 @@ PROGRAM RK_Solution
 	
 	call cpu_time(end_time3)
 	write(*, *) "All parameters before main propagation loop:", end_time3-end_time2, "seconds"	
-
+	
 !  The main time-propogation loop
 	allocate(Cout(num_states))
 	do while (t<=t_final)
