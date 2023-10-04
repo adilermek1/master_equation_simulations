@@ -3,8 +3,8 @@ PROGRAM RK_Solution
 	implicit none
 	real*8 :: t0, t_final, t, h
 	real*8, dimension(:), allocatable:: C, dCdt, Cout, kdecs_per_s, C_separate, dCdt_separate, C_equilibrium_separate, part_funcs
-	character(100) :: output, output1, output2, output3, output4, output5, output6, output7
-	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, cunit, j, unit, n, last_bound, k
+	character(100) :: output, output1, output2, output3, output4, output5, output6, output7, output8, output9
+	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, cunit, dunit, eunit, j, unit, n, last_bound, k
 	integer :: unit_K0, unit_K1, unit_K2, unit_K3, unit_K4, unit_K5, unit_K6, unit_K7, &
 	unit_K8, unit_K9, unit_K10, unit_K11, unit_K12, unit_K13, unit_K14, unit_K15, unit_K16, &
 	unit_K17, unit_K18, unit_K19, unit_K20
@@ -24,7 +24,8 @@ PROGRAM RK_Solution
 	ios_K9, ios_K10, ios_K11, ios_K12, ios_K13, ios_K14, ios_K15, ios_K16, ios_K17, ios_K18, ios_K19, ios_K20
 	
 	real*8, dimension(:), allocatable :: Energies, Gammas, Covalent_All, Vdw_All, Infinity_All, equilibrium_constants_m3
-	real*8, dimension(:, :), allocatable :: transition_matrix
+	real*8, dimension(:, :), allocatable :: transition_matrix, truncated_matrix
+	integer, dimension(:, :), allocatable :: state_pointer
 	real*8, dimension(:), allocatable :: First_term, Second_term, sum_rows, threshold_Energies_K
 	real*8 :: h_j_per_s, hbar_js, c_cm_per_s, C_O_per_m3, C_O2_per_m3, temp_k
 	real*8 :: part_funcs_o2_per_m3
@@ -39,14 +40,14 @@ PROGRAM RK_Solution
 	real*8 :: k_rec, lower_energy_lim, upper_energy_lim, upper_gamma_lim, lower_gamma_lim
 	integer :: threshold_j, Js, Ks, vib_sym_well, iteration_counter, print_freq, K_initial, K_final, band_width
 	integer, dimension(:), allocatable :: num_states_K, K_value, threshold_j_values, Resonance, num_counter_K, &
-	unit_K, ios_K
+	unit_K, ios_K, istart, ifinish, cutoff_count
 	
 	real*8 :: start_time, end_time, end_time1, end_time2, end_time3, tmp_energies, tmp_gammas, tmp_covalent_all, &
 	tmp_vdw_all, tmp_infinity_all, tmp_k_value, tmp_resonance, kt_energy_j, dE_down, kij_min
 	
-	integer :: istart, ifinish, Ks_indep, cutoff_count, cutoff_count_max
+	integer :: Ks_indep, cutoff_count_max
 	
-	logical :: print_detail, truncation, K_dependent
+	logical :: print_detail, truncation, K_dependent, print_transition_matrix
 	
 !---------------------------------------------------------------------------------------------------------------------------	
 	
@@ -110,8 +111,9 @@ PROGRAM RK_Solution
 	band_width = 10
 	print_freq = 10
 	print_detail = .True.
-	truncation = .False.
+	truncation = .True.!.False.
 	K_dependent = .False.
+	print_transition_matrix = .True.
 
 ! Specify the directory and file name  
     directory_J0_K0 = "/mmfs1/home/3436yermeka/ozone_kinetics/data/resonances/mol_666/half_integers/J_0/K_0/symmetry_1"
@@ -150,7 +152,7 @@ PROGRAM RK_Solution
 	num_states = 0
 	
 	K_initial = 0
-	K_final = 0
+	K_final = 20
 	allocate(num_states_K(K_final+1))
 	allocate(threshold_Energies_K(K_final+1))
 	allocate(threshold_j_values(K_final+1))
@@ -266,55 +268,56 @@ PROGRAM RK_Solution
 		num_counter_K = 1
 		allocate(unit_K(K_final+1))
 		unit_K(1) = unit_K0
-!		unit_K(2) = unit_K1
-!		unit_K(3) = unit_K2
-!		unit_K(4) = unit_K3
-!		unit_K(5) = unit_K4
-!		
-!		unit_K(6) = unit_K5
-!		unit_K(7) = unit_K6
-!		unit_K(8) = unit_K7
-!		unit_K(9) = unit_K8
-!		unit_K(10) = unit_K9
-!		
-!		unit_K(11) = unit_K10
-!		unit_K(12) = unit_K11
-!		unit_K(13) = unit_K12
-!		unit_K(14) = unit_K13
-!		unit_K(15) = unit_K14
-!		
-!		unit_K(16) = unit_K15
-!		unit_K(17) = unit_K16
-!		unit_K(18) = unit_K17
-!		unit_K(19) = unit_K18
-!		unit_K(20) = unit_K19
-!		unit_K(21) = unit_K20
+		unit_K(2) = unit_K1
+		unit_K(3) = unit_K2
+		unit_K(4) = unit_K3
+		unit_K(5) = unit_K4
+		
+		unit_K(6) = unit_K5
+		unit_K(7) = unit_K6
+		unit_K(8) = unit_K7
+		unit_K(9) = unit_K8
+		unit_K(10) = unit_K9
+		
+		unit_K(11) = unit_K10
+		unit_K(12) = unit_K11
+		unit_K(13) = unit_K12
+		unit_K(14) = unit_K13
+		unit_K(15) = unit_K14
+		
+		unit_K(16) = unit_K15
+		unit_K(17) = unit_K16
+		unit_K(18) = unit_K17
+		unit_K(19) = unit_K18
+		unit_K(20) = unit_K19
+		unit_K(21) = unit_K20
 		
 		allocate(ios_K(K_final+1))
 		ios_K(1) = ios_K0
-!		ios_K(2) = ios_K1
-!		ios_K(3) = ios_K2
-!		ios_K(4) = ios_K3
-!		ios_K(5) = ios_K4
-!		
-!		ios_K(6) = ios_K5
-!		ios_K(7) = ios_K6
-!		ios_K(8) = ios_K7
-!		ios_K(9) = ios_K8
-!		ios_K(10) = ios_K9
-!		
-!		ios_K(11) = ios_K10
-!		ios_K(12) = ios_K11
-!		ios_K(13) = ios_K12
-!		ios_K(14) = ios_K13
-!		ios_K(15) = ios_K14
-!		
-!		ios_K(16) = ios_K15
-!		ios_K(17) = ios_K16
-!		ios_K(18) = ios_K17
-!		ios_K(19) = ios_K18
-!		ios_K(20) = ios_K19
-!		ios_K(21) = ios_K20
+		ios_K(2) = ios_K1
+		ios_K(3) = ios_K2
+		ios_K(4) = ios_K3
+		ios_K(5) = ios_K4
+		
+		ios_K(6) = ios_K5
+		ios_K(7) = ios_K6
+		ios_K(8) = ios_K7
+		ios_K(9) = ios_K8
+		ios_K(10) = ios_K9
+		
+		ios_K(11) = ios_K10
+		ios_K(12) = ios_K11
+		ios_K(13) = ios_K12
+		ios_K(14) = ios_K13
+		ios_K(15) = ios_K14
+		
+		ios_K(16) = ios_K15
+		ios_K(17) = ios_K16
+		ios_K(18) = ios_K17
+		ios_K(19) = ios_K18
+		ios_K(20) = ios_K19
+		ios_K(21) = ios_K20
+		
 ! Computes threshold energy
         !threshold_energy_j = get_higher_barrier_threshold()	
 		filepath_K0 = trim(directory_J24_K0) // '/' // trim(filename)
@@ -344,49 +347,49 @@ PROGRAM RK_Solution
 		
 		open(newunit=unit_K(1), file=filepath_K0, status='old', action='read', iostat=ios_K(1))
 		read(unit_K(1), *)
-!		open(newunit=unit_K(2), file=filepath_K1, status='old', action='read', iostat=ios_K(2))
-!		read(unit_K(2), *)
-!		open(newunit=unit_K(3), file=filepath_K2, status='old', action='read', iostat=ios_K(3))
-!		read(unit_K(3), *)
-!		open(newunit=unit_K(4), file=filepath_K3, status='old', action='read', iostat=ios_K(4))
-!		read(unit_K(4), *)
-!		open(newunit=unit_K(5), file=filepath_K4, status='old', action='read', iostat=ios_K(5))
-!		read(unit_K(5), *)
-!
-!		open(newunit=unit_K(6), file=filepath_K5, status='old', action='read', iostat=ios_K(6))
-!		read(unit_K(6), *)
-!		open(newunit=unit_K(7), file=filepath_K6, status='old', action='read', iostat=ios_K(7))
-!		read(unit_K(7), *)
-!		open(newunit=unit_K(8), file=filepath_K7, status='old', action='read', iostat=ios_K(8))
-!		read(unit_K(8), *)
-!		open(newunit=unit_K(9), file=filepath_K8, status='old', action='read', iostat=ios_K(9))
-!		read(unit_K(9), *)
-!		open(newunit=unit_K(10), file=filepath_K9, status='old', action='read', iostat=ios_K(10))
-!		read(unit_K(10), *)
-!		
-!		open(newunit=unit_K(11), file=filepath_K10, status='old', action='read', iostat=ios_K(11))
-!		read(unit_K(11), *)
-!		open(newunit=unit_K(12), file=filepath_K11, status='old', action='read', iostat=ios_K(12))
-!		read(unit_K(12), *)
-!		open(newunit=unit_K(13), file=filepath_K12, status='old', action='read', iostat=ios_K(13))
-!		read(unit_K(13), *)
-!		open(newunit=unit_K(14), file=filepath_K13, status='old', action='read', iostat=ios_K(14))
-!		read(unit_K(14), *)
-!		open(newunit=unit_K(15), file=filepath_K14, status='old', action='read', iostat=ios_K(15))
-!		read(unit_K(15), *)
-!		
-!		open(newunit=unit_K(16), file=filepath_K15, status='old', action='read', iostat=ios_K(16))
-!		read(unit_K(16), *)
-!		open(newunit=unit_K(17), file=filepath_K16, status='old', action='read', iostat=ios_K(17))
-!		read(unit_K(17), *)
-!		open(newunit=unit_K(18), file=filepath_K17, status='old', action='read', iostat=ios_K(18))
-!		read(unit_K(18), *)
-!		open(newunit=unit_K(19), file=filepath_K18, status='old', action='read', iostat=ios_K(19))
-!		read(unit_K(19), *)
-!		open(newunit=unit_K(20), file=filepath_K19, status='old', action='read', iostat=ios_K(20))
-!		read(unit_K(20), *)
-!		open(newunit=unit_K(21), file=filepath_K20, status='old', action='read', iostat=ios_K(21))
-!		read(unit_K(21), *)
+		open(newunit=unit_K(2), file=filepath_K1, status='old', action='read', iostat=ios_K(2))
+		read(unit_K(2), *)
+		open(newunit=unit_K(3), file=filepath_K2, status='old', action='read', iostat=ios_K(3))
+		read(unit_K(3), *)
+		open(newunit=unit_K(4), file=filepath_K3, status='old', action='read', iostat=ios_K(4))
+		read(unit_K(4), *)
+		open(newunit=unit_K(5), file=filepath_K4, status='old', action='read', iostat=ios_K(5))
+		read(unit_K(5), *)
+
+		open(newunit=unit_K(6), file=filepath_K5, status='old', action='read', iostat=ios_K(6))
+		read(unit_K(6), *)
+		open(newunit=unit_K(7), file=filepath_K6, status='old', action='read', iostat=ios_K(7))
+		read(unit_K(7), *)
+		open(newunit=unit_K(8), file=filepath_K7, status='old', action='read', iostat=ios_K(8))
+		read(unit_K(8), *)
+		open(newunit=unit_K(9), file=filepath_K8, status='old', action='read', iostat=ios_K(9))
+		read(unit_K(9), *)
+		open(newunit=unit_K(10), file=filepath_K9, status='old', action='read', iostat=ios_K(10))
+		read(unit_K(10), *)
+		
+		open(newunit=unit_K(11), file=filepath_K10, status='old', action='read', iostat=ios_K(11))
+		read(unit_K(11), *)
+		open(newunit=unit_K(12), file=filepath_K11, status='old', action='read', iostat=ios_K(12))
+		read(unit_K(12), *)
+		open(newunit=unit_K(13), file=filepath_K12, status='old', action='read', iostat=ios_K(13))
+		read(unit_K(13), *)
+		open(newunit=unit_K(14), file=filepath_K13, status='old', action='read', iostat=ios_K(14))
+		read(unit_K(14), *)
+		open(newunit=unit_K(15), file=filepath_K14, status='old', action='read', iostat=ios_K(15))
+		read(unit_K(15), *)
+		
+		open(newunit=unit_K(16), file=filepath_K15, status='old', action='read', iostat=ios_K(16))
+		read(unit_K(16), *)
+		open(newunit=unit_K(17), file=filepath_K16, status='old', action='read', iostat=ios_K(17))
+		read(unit_K(17), *)
+		open(newunit=unit_K(18), file=filepath_K17, status='old', action='read', iostat=ios_K(18))
+		read(unit_K(18), *)
+		open(newunit=unit_K(19), file=filepath_K18, status='old', action='read', iostat=ios_K(19))
+		read(unit_K(19), *)
+		open(newunit=unit_K(20), file=filepath_K19, status='old', action='read', iostat=ios_K(20))
+		read(unit_K(20), *)
+		open(newunit=unit_K(21), file=filepath_K20, status='old', action='read', iostat=ios_K(21))
+		read(unit_K(21), *)
 
 ! Read and store the filtered data
 		do 
@@ -451,29 +454,29 @@ PROGRAM RK_Solution
 	end do
 		
 10		close(unit_K0)
-!		close(unit_K1)
-!		close(unit_K2)
-!		close(unit_K3)
-!		close(unit_K4)
-!		
-!		close(unit_K5)
-!		close(unit_K6)
-!		close(unit_K7)
-!		close(unit_K8)
-!		close(unit_K9)
-!		
-!		close(unit_K10)
-!		close(unit_K11)
-!		close(unit_K12)
-!		close(unit_K13)
-!		close(unit_K14)
-!
-!		close(unit_K15)
-!		close(unit_K16)
-!		close(unit_K17)
-!		close(unit_K18)
-!		close(unit_K19)
-!		close(unit_K20)
+		close(unit_K1)
+		close(unit_K2)
+		close(unit_K3)
+		close(unit_K4)
+		
+		close(unit_K5)
+		close(unit_K6)
+		close(unit_K7)
+		close(unit_K8)
+		close(unit_K9)
+		
+		close(unit_K10)
+		close(unit_K11)
+		close(unit_K12)
+		close(unit_K13)
+		close(unit_K14)
+
+		close(unit_K15)
+		close(unit_K16)
+		close(unit_K17)
+		close(unit_K18)
+		close(unit_K19)
+		close(unit_K20)
 		
 	print *, "Counter over number of states:", num_counter-1
 	call cpu_time(end_time2)
@@ -529,45 +532,106 @@ PROGRAM RK_Solution
 	allocate(transition_matrix(num_states, num_states))
     transition_matrix = calculate_transition_matrix_unitless(Energies, Covalent_All, Vdw_All, Infinity_All, dE_down)
 	
-	output2 = 'transition_matrix.csv'
-    open(newunit=kunit, file=output2, status='replace')
-	do i = 1, size(transition_matrix, 1)
-	 write(kunit, '(1x,I8,a1)', advance='no') i, ','
-	end do
-	write (kunit, *)
-	
-	do i = 1, size(transition_matrix, 1)
-		do j = 1, size(transition_matrix, 2)
-		 if (j == 1) then
-			write(kunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', transition_matrix(i, j), ','
-		 else 
-			write(kunit, '(E19.12,a1,1x)', advance='no') transition_matrix(i, j), ',' 
-		 end if
-		!write(kunit, *) transition_matrix(i, :), ','
+	if (print_transition_matrix .eqv. .True.) then
+		output2 = 'transition_matrix.csv'
+		open(newunit=kunit, file=output2, status='replace')
+		do j = 1, size(transition_matrix, 1)
+		 write(kunit, '(1x,I8,a1)', advance='no') j, ','
 		end do
 		write (kunit, *)
-	end do
-	close(kunit)
+		
+		do i = 1, size(transition_matrix, 1)
+			do j = 1, size(transition_matrix, 2)
+			 if (j == 1) then
+				write(kunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', transition_matrix(j, i), ','
+			 else 
+				write(kunit, '(E19.12,a1,1x)', advance='no') transition_matrix(j, i), ',' 
+			 end if
+			end do
+			write (kunit, *)
+		end do
+		close(kunit)
+	end if
 
 ! Counting the elements which are greater than cuttoff value in the transition matrix
-	output7 = 'cuttoff_count_numbers.txt'
+	output7 = 'cuttoff_count_numbers.out'
+	open(newunit=cunit, file=output7, status='replace')
+	output8 = 'truncated_matrix.csv'
+	open(newunit=dunit, file=output8, status='replace')
+	output9 = 'state_pointer.csv'
+	open(newunit=eunit, file=output9, status='replace')
+	
 	cutoff_count_max = 0
 	kij_min = 0.01
-	do i = 1, size(transition_matrix, 1)
-	  cutoff_count = 0
-		do j = 1, size(transition_matrix, 2)
-		 if (transition_matrix(i, j) .gt. kij_min) cutoff_count = cutoff_count + 1
+	
+	allocate(istart(num_states))
+	allocate(ifinish(num_states))
+	allocate(cutoff_count(num_states))
+	allocate(state_pointer(num_states, num_states))
+	allocate(truncated_matrix(num_states, num_states))
+	ifinish = num_states
+	cutoff_count = 0
+	state_pointer = 0
+	truncated_matrix = 0
+	
+	do i = 1, num_states
+	  istart(i) = 0
+		do j = 1, num_states
+			 if (transition_matrix(j, i) .gt. kij_min) then 
+			 cutoff_count(i) = cutoff_count(i) + 1
+			 truncated_matrix(cutoff_count(i), i) = transition_matrix(j, i)
+			 state_pointer(cutoff_count(i), i) = j		 
+			 if (istart(i) .eq. 0) istart(i) = j
+			 ifinish(i) = j
+			 end if
 		end do
-		write (cunit, *) i, cutoff_count
+		write(cunit, *) i, cutoff_count(i), istart(i), ifinish(i), ifinish(i) - istart(i) + 1, &
+		ifinish(i) - istart(i) + 1 - cutoff_count(i)
 		
-		if (cutoff_count .gt. cutoff_count_max) cutoff_count_max = cutoff_count
+		if (cutoff_count(i) .gt. cutoff_count_max) cutoff_count_max = cutoff_count(i)
 	end do	
-	write (cunit, *) cutoff_count_max
+	write(cunit, *) cutoff_count_max
 	close(cunit)
+
+! Print truncation matrix
+	do j = 1, cutoff_count_max
+	 write(dunit, '(1x,I8,a1)', advance='no') j, ','
+	end do
+	write (dunit, *)
 	
-	stop 
+	do i = 1, size(truncated_matrix, 1)
+		do j = 1, cutoff_count_max
+		 if (j == 1) then
+			write(dunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', truncated_matrix(j, i), ','
+		 else 
+			write(dunit, '(E19.12,a1,1x)', advance='no') truncated_matrix(j, i), ',' 
+		 end if
+		end do
+		write (dunit, *)
+	end do
+	close(dunit)
+
+! Print state_pointer matrix
+	do j = 1, cutoff_count_max
+	 write(eunit, '(1x,I8,a1)', advance='no') j, ','
+	end do
+	write (eunit, *)
 	
+	do i = 1, size(state_pointer, 1)
+		do j = 1, cutoff_count_max
+		 if (j == 1) then
+			write(eunit, '(I8,a1,1x,I8,a1,1x)', advance='no') i, ',', state_pointer(j, i), ','
+		 else 
+			write(eunit, '(I8,a1,1x)', advance='no') state_pointer(j, i), ',' 
+		 end if
+		end do
+		write (eunit, *)
+	end do
+	close(eunit)			
+	
+! Scaling of the matrices
 	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
+	truncated_matrix = truncated_matrix * k0_m3_per_s * M_per_m3
 
 ! Compute sum of rows in the transition matrix
 	allocate(sum_rows(num_states))
@@ -723,24 +787,33 @@ PROGRAM RK_Solution
 		real*8 Third_term
 		
 ! Calculate the derivatives dC/dt
+! Loop over final states, same as equation numbers:
+!		do i = pe+1, num_states, pe_num
 		do i = 1, num_states
 ! calculate sum for individual state - Third_term		
 			Third_term = 0 ! Initialize Third_term for this state	
 				
+! Loop over initial states, all terms of the summ:
 				if (truncation .eqv. .False.) then
 					do j = 1, num_states 
 						Third_term = Third_term + transition_matrix(j, i) * C(j)
 					end do
 				else
-					istart = max(1, i-band_width/2)
-					ifinish = min(i+band_width/2, num_states)
-					do j = istart, ifinish 
-						Third_term = Third_term + transition_matrix(j, i) * C(j)
+!					istart(i) = max(1, i-band_width/2)
+!					ifinish(i) = min(i+band_width/2, num_states)
+!					do j = istart(i), ifinish(i) 
+					do j = 1, cutoff_count(i)
+						Third_term = Third_term + truncated_matrix(j, i) * C(state_pointer(j,i))
+!						Third_term = Third_term + transition_matrix(j, i) * C(j)
 					end do
 				end if
 								
 			dCdt(i) = First_term(i) - Second_term(i)*C(i) + Third_term
 		end do
+		
+!			mpi.barrier
+!			mpi.broadcast(dCdt(i))
+			
 			!dCdt = First_term - kdecs_per_s*C + MATMUL(modified_transition_matrix_per_s_transposed, C)
 	end subroutine derivs
 	
