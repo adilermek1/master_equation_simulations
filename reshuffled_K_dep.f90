@@ -12,12 +12,12 @@ PROGRAM RK_Solution
 	
 	real*8 :: t0, t_final, t, h
 	real*8, dimension(:), allocatable:: C, dCdt, Cout, kdecs_per_s, C_separate, dCdt_separate, C_equilibrium_separate, part_funcs, &
-	eq_conc, C_tmp
+	eq_conc
 	character(100) :: output, output1, output2, output3, output4, output5, output6, output7, output8, output9, output10, output11
 	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, cunit, dunit, eunit, funit, j, unit, n, last_bound, k, gunit
 	integer :: unit_K0, unit_K1, unit_K2, unit_K3, unit_K4, unit_K5, unit_K6, unit_K7, &
 	unit_K8, unit_K9, unit_K10, unit_K11, unit_K12, unit_K13, unit_K14, unit_K15, unit_K16, &
-	unit_K17, unit_K18, unit_K19, unit_K20
+	unit_K17, unit_K18, unit_K19, unit_K20, a, counter
 	
 ! Parameters for kinetics
 	character(len=100) :: directory, filename 
@@ -30,10 +30,12 @@ PROGRAM RK_Solution
 	ios_K9, ios_K10, ios_K11, ios_K12, ios_K13, ios_K14, ios_K15, ios_K16, ios_K17, ios_K18, ios_K19, ios_K20
 	
 	real*8, dimension(:), allocatable :: Energies, Gammas, Covalent_All, Vdw_All, Infinity_All, equilibrium_constants_m3, eq_concs
-	real*8, dimension(:, :), allocatable :: transition_matrix, truncated_matrix
+	real*8, dimension(:, :), allocatable :: truncated_matrix
+	real*8, dimension(:, :), allocatable :: transition_matrix, Second_term_2d
+	real*8, dimension(:, :, :), allocatable :: transition_matrix_3D
 	integer, dimension(:, :), allocatable :: state_pointer
 	real*8, dimension(:), allocatable :: First_term, Second_term, Second_term_truncated, sum_rows, &
-	threshold_Energies_K, sum_rows_truncated
+	threshold_Energies_K, sum_rows_truncated, Second_term_main
 	real*8 :: h_j_per_s, hbar_js, c_cm_per_s, C_O_per_m3, C_O2_per_m3, temp_k
 	real*8 :: part_funcs_o2_per_m3
 	character(len=3) :: o3_molecule
@@ -52,10 +54,10 @@ PROGRAM RK_Solution
 	real*8 :: start_time, end_time, end_time1, end_time2, end_time3, tmp_energies, tmp_gammas, tmp_covalent_all, &
 	tmp_vdw_all, tmp_infinity_all, tmp_k_value, tmp_resonance, kt_energy_j, dE_down, kij_min, start_time_matrix, &
 	end_time_matrix, start_time_master_eq, end_time_master_eq, C_initial_O3_per_m3, &
-	sum_eq_conc, E_dd, tmp_sym_value, tmp_j_value
+	sum_eq_conc, E_dd, tmp_sym_value, tmp_j_value, w_1
 	
 	integer :: Ks_indep, cutoff_count_max, pe_num, ierr_a, myid, chunk_size, K_step, K_final_last, vib_sym_well_start, &
-	vib_sym_well_last, J_initial, J_final
+	vib_sym_well_last, J_initial, J_final, w
 	
 	logical :: print_detail, truncation, K_dependent, print_transition_matrix
 	integer, dimension(:, :, :), allocatable :: num_states_J_K_sym, &
@@ -79,7 +81,7 @@ PROGRAM RK_Solution
 	
 	barrier_energies_matrix = read_matrix(barrier_filepath)
 	
-!	! Print the matrix
+	! Print the matrix
 !	if (myid == 0) then
 !	do i = 1, barrier_rows
 !			write(*, '(65(1x,E21.14))') barrier_energies_matrix(i, :)
@@ -148,7 +150,7 @@ PROGRAM RK_Solution
 	print_detail = .True.
 	truncation = .False.
 	K_dependent = .False.
-	print_transition_matrix = .True.
+	print_transition_matrix = .False.
 	
 ! Specify the directory and file name  
 	filename = "state_properties.fwc"
@@ -195,7 +197,7 @@ PROGRAM RK_Solution
 						! Construct the full file path
 						filepath = trim(directory) // '/' // trim(filename)
 						filepath_JKsym(Js+1, Ks+1, vib_sym_well+1) = filepath
-						print*, filepath
+!						print*, filepath
 							
 							! Open and read the file with kinetics data
 							open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
@@ -228,7 +230,7 @@ PROGRAM RK_Solution
 						! Construct the full file path
 						filepath = trim(directory) // '/' // trim(filename)
 						filepath_JKsym(Js+1, Ks+1, vib_sym_well+1) = filepath
-						print*, filepath
+!						print*, filepath
 						
 							! Open and read the file with kinetics data
 							open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
@@ -264,7 +266,7 @@ PROGRAM RK_Solution
 						! Construct the full file path
 						filepath = trim(directory) // '/' // trim(filename)
 						filepath_JKsym(Js+1, Ks+1, vib_sym_well+1) = filepath
-						print*, filepath
+!						print*, filepath
 
 							! Open and read the file with kinetics data
 							open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
@@ -297,7 +299,7 @@ PROGRAM RK_Solution
 						! Construct the full file path
 						filepath = trim(directory) // '/' // trim(filename)
 						filepath_JKsym(Js+1, Ks+1, vib_sym_well+1) = filepath
-						print*, filepath
+!						print*, filepath
 						
 							! Open and read the file with kinetics data
 							open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
@@ -508,6 +510,15 @@ PROGRAM RK_Solution
 	
 	end if
 	
+	if (myid == 0 ) then
+		w = int(((pe_num)*chunk_size - num_states) / chunk_size)
+		w_1 = real(((pe_num - w) * chunk_size - num_states), kind=8) / real(chunk_size, kind=8) * 100.0
+		print*, 'Chunk size:', chunk_size
+		print*, 'The number of not loaded processors:', w
+		print*, 'Percent load of the last loaded processor:', w_1
+	end if
+	
+	
 ! Check that sorting is correct	
 	do i = 2, num_states
 		if (Energies(i) < Energies(i-1)) then
@@ -576,12 +587,12 @@ PROGRAM RK_Solution
 	end do	
 	
 	call cpu_time(start_time_matrix)
-! Compute and print transition matrix	
-	allocate(transition_matrix(num_states, num_states))
-    transition_matrix = calculate_transition_matrix_unitless(Energies, Covalent_All, Vdw_All, Infinity_All, dE_down)
+	! Compute and print transition matrix	
+	allocate(transition_matrix(chunk_size, num_states))
+	transition_matrix = calculate_transition_matrix_unitless(Energies, Covalent_All, Vdw_All, Infinity_All, dE_down)
 
+! Scaling of the matrices
 	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
-
 
 !	output11 = 'distribution_of_concentrations_over_kij_kji.txt'
 !	open(newunit=gunit, file=output11, status='replace')
@@ -598,129 +609,151 @@ PROGRAM RK_Solution
 !	close(gunit)
 	
 	
-	if (myid == 0) then
-		if (print_transition_matrix .eqv. .True.) then
-			output2 = 'transition_matrix.csv'
-			open(newunit=kunit, file=output2, status='replace')
-			do j = 1, size(transition_matrix, 1)
-				write(kunit, '(1x,I8,a1)', advance='no') j, ','
-			end do
-				write (kunit, *)
-			
-			do i = 1, size(transition_matrix, 1)
-				do j = 1, size(transition_matrix, 2)
-				 if (j == 1) then
-					write(kunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', transition_matrix(j, i), ','
-				 else 
-					write(kunit, '(E19.12,a1,1x)', advance='no') transition_matrix(j, i), ',' 
-				 end if
-				end do
-				write (kunit, *)
-			end do
-			close(kunit)
-		end if
-	end if
+!	if (myid == 0) then
+!		if (print_transition_matrix .eqv. .True.) then
+!			output2 = 'transition_matrix.csv'
+!			open(newunit=kunit, file=output2, status='replace')
+!			do j = 1, size(transition_matrix, 1)
+!				write(kunit, '(1x,I8,a1)', advance='no') j, ','
+!			end do
+!				write (kunit, *)
+!			
+!			do i = 1, size(transition_matrix, 1)
+!				do j = 1, size(transition_matrix, 2)
+!				 if (j == 1) then
+!					write(kunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', transition_matrix(i, j), ','
+!				 else 
+!					write(kunit, '(E19.12,a1,1x)', advance='no') transition_matrix(i, j), ',' 
+!				 end if
+!				end do
+!				write (kunit, *)
+!			end do
+!			close(kunit)
+!		end if
+!	end if
 
-! Counting the elements which are greater than cuttoff value in the transition matrix
-	output7 = 'cuttoff_count_numbers.out'
-	open(newunit=cunit, file=output7, status='replace')
-	output8 = 'truncated_matrix.csv'
-	open(newunit=dunit, file=output8, status='replace')
-	output9 = 'state_pointer.csv'
-	open(newunit=eunit, file=output9, status='replace')
+!! Counting the elements which are greater than cuttoff value in the transition matrix
+!	output7 = 'cuttoff_count_numbers.out'
+!	open(newunit=cunit, file=output7, status='replace')
+!	output8 = 'truncated_matrix.csv'
+!	open(newunit=dunit, file=output8, status='replace')
+!	output9 = 'state_pointer.csv'
+!	open(newunit=eunit, file=output9, status='replace')
+!	
+!	cutoff_count_max = 0
+!	kij_min = 0.1
+!	
+!	allocate(istart(num_states))
+!	allocate(ifinish(num_states))
+!	allocate(cutoff_count(num_states))
+!	allocate(state_pointer(num_states, num_states))
+!	allocate(truncated_matrix(num_states, num_states))
+!	ifinish = num_states
+!	cutoff_count = 0
+!	state_pointer = 0
+!	truncated_matrix = 0
+!	
+!	do i = 1, num_states
+!!	  istart(i) = 0
+!		do j = 1, num_states
+!			 if (transition_matrix(j, i) .gt. kij_min) then 
+!			 cutoff_count(i) = cutoff_count(i) + 1
+!!			 truncated_matrix(cutoff_count(i), i) = transition_matrix(j, i)
+!			 truncated_matrix(j, i) = transition_matrix(j, i)
+!			 truncated_matrix(i, j) = transition_matrix(i, j)
+!			 state_pointer(cutoff_count(i), i) = j		 
+!			 ifinish(i) = j	
+!!			 if (istart(i) .eq. 0) istart(i) = j			 
+!			 end if
+!		end do
+!				
+!		if (cutoff_count(i) .gt. cutoff_count_max) cutoff_count_max = cutoff_count(i)
+!	end do
+!
+!! Finding istart indexes	
+!	do i = 1, num_states
+!		istart(i) = 0
+!		do j = 1, num_states
+!			if (truncated_matrix(j,i) /= 0) then
+!				if (istart(i) .eq. 0) istart(i) = j
+!			end if
+!		end do
+!		istart(1) = 1
+!		if (myid == 0) write(cunit, *) i, cutoff_count(i), istart(i), ifinish(i), ifinish(i) - istart(i) + 1, &
+!		ifinish(i) - istart(i) + 1 - cutoff_count(i)
+!	end do
+!	if (myid == 0) write(cunit, *) cutoff_count_max
+!	close(cunit)
+!
+!! Print truncation matrix
+!	if (myid == 0) then
+!		if (print_transition_matrix .eqv. .True.) then	
+!			do j = 1, cutoff_count_max
+!				write(dunit, '(1x,I8,a1)', advance='no') j, ','
+!			end do
+!				write (dunit, *)
+!			
+!			do i = 1, size(truncated_matrix, 1)
+!				do j = 1, cutoff_count_max
+!				 if (j == 1) then
+!					write(dunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', truncated_matrix(j, i), ','
+!				 else 
+!					write(dunit, '(E19.12,a1,1x)', advance='no') truncated_matrix(j, i), ',' 
+!				 end if
+!				end do
+!					write (dunit, *)
+!			end do
+!			close(dunit)
+!		end if
+!	end if
+!
+!! Print state_pointer matrix
+!	if (myid == 0) then
+!		if (print_transition_matrix .eqv. .True.) then	
+!			do j = 1, cutoff_count_max
+!				write(eunit, '(1x,I8,a1)', advance='no') j, ','
+!			end do
+!				write (eunit, *)
+!			
+!			do i = 1, size(state_pointer, 1)
+!				do j = 1, cutoff_count_max
+!				 if (j == 1) then
+!					write(eunit, '(I8,a1,1x,I8,a1,1x)', advance='no') i, ',', state_pointer(j, i), ','
+!				 else 
+!					write(eunit, '(I8,a1,1x)', advance='no') state_pointer(j, i), ',' 
+!				 end if
+!				end do
+!					write (eunit, *)
+!			end do
+!			close(eunit)
+!		end if
+!	end if
 	
-	cutoff_count_max = 0
-	kij_min = 0.1
 	
-	allocate(istart(num_states))
-	allocate(ifinish(num_states))
-	allocate(cutoff_count(num_states))
-	allocate(state_pointer(num_states, num_states))
-	allocate(truncated_matrix(num_states, num_states))
-	ifinish = num_states
-	cutoff_count = 0
-	state_pointer = 0
-	truncated_matrix = 0
-	
-	do i = 1, num_states
-!	  istart(i) = 0
-		do j = 1, num_states
-			 if (transition_matrix(j, i) .gt. kij_min) then 
-			 cutoff_count(i) = cutoff_count(i) + 1
-!			 truncated_matrix(cutoff_count(i), i) = transition_matrix(j, i)
-			 truncated_matrix(j, i) = transition_matrix(j, i)
-			 truncated_matrix(i, j) = transition_matrix(i, j)
-			 state_pointer(cutoff_count(i), i) = j		 
-			 ifinish(i) = j	
-!			 if (istart(i) .eq. 0) istart(i) = j			 
-			 end if
-		end do
-				
-		if (cutoff_count(i) .gt. cutoff_count_max) cutoff_count_max = cutoff_count(i)
-	end do
-
-! Finding istart indexes	
-	do i = 1, num_states
-		istart(i) = 0
-		do j = 1, num_states
-			if (truncated_matrix(j,i) /= 0) then
-				if (istart(i) .eq. 0) istart(i) = j
-			end if
-		end do
-		istart(1) = 1
-		if (myid == 0) write(cunit, *) i, cutoff_count(i), istart(i), ifinish(i), ifinish(i) - istart(i) + 1, &
-		ifinish(i) - istart(i) + 1 - cutoff_count(i)
-	end do
-	if (myid == 0) write(cunit, *) cutoff_count_max
-	close(cunit)
-
-! Print truncation matrix
-	if (myid == 0) then
-		if (print_transition_matrix .eqv. .True.) then	
-			do j = 1, cutoff_count_max
-				write(dunit, '(1x,I8,a1)', advance='no') j, ','
-			end do
-				write (dunit, *)
-			
-			do i = 1, size(truncated_matrix, 1)
-				do j = 1, cutoff_count_max
-				 if (j == 1) then
-					write(dunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', truncated_matrix(j, i), ','
-				 else 
-					write(dunit, '(E19.12,a1,1x)', advance='no') truncated_matrix(j, i), ',' 
-				 end if
-				end do
-					write (dunit, *)
-			end do
-			close(dunit)
-		end if
-	end if
-
-! Print state_pointer matrix
-	if (myid == 0) then
-		if (print_transition_matrix .eqv. .True.) then	
-			do j = 1, cutoff_count_max
-				write(eunit, '(1x,I8,a1)', advance='no') j, ','
-			end do
-				write (eunit, *)
-			
-			do i = 1, size(state_pointer, 1)
-				do j = 1, cutoff_count_max
-				 if (j == 1) then
-					write(eunit, '(I8,a1,1x,I8,a1,1x)', advance='no') i, ',', state_pointer(j, i), ','
-				 else 
-					write(eunit, '(I8,a1,1x)', advance='no') state_pointer(j, i), ',' 
-				 end if
-				end do
-					write (eunit, *)
-			end do
-			close(eunit)
-		end if
-	end if
 	
 	call cpu_time(end_time_matrix)
 	if (myid == 0) write(*, *) "Time for calculating and writing matricies (transition, truncation and state pointer):", &
 	end_time_matrix-start_time_matrix, "seconds"
+	
+	
+	
+! Allocate global transition matrix
+	if (myid .eq. 0) then
+		allocate(transition_matrix_3D(chunk_size, num_states, pe_num))
+		transition_matrix_3D = 0
+	end if
+	
+! Gather local transition matrix from all processes to global transition matrix
+	call MPI_GATHER(transition_matrix, chunk_size*num_states, MPI_REAL8, &
+                  transition_matrix_3D(:, :, myid+1), chunk_size*num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+	call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )				  
+
+! Print global_matrix to a file on the master process
+	if (myid == 0) then
+	  call write_global_matrix_to_file(transition_matrix_3D, "output_global_matrix.csv", pe_num)
+	end if			  
+	
+	if (myid .eq. 0) deallocate(transition_matrix_3D)
 	
 ! Scaling of the matrices
 !	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
@@ -731,11 +764,18 @@ PROGRAM RK_Solution
 	allocate(sum_rows_truncated(num_states))
 	sum_rows = 0
 	sum_rows_truncated = 0
-	do i = 1, num_states
-		do j = 1, num_states
-				sum_rows(i) = sum_rows(i) + transition_matrix(i, j)
-				sum_rows_truncated(i) = sum_rows_truncated(i) + truncated_matrix(i, j)
-		end do
+!	do i = 1, num_states
+!		do j = 1, num_states
+!				sum_rows(i) = sum_rows(i) + transition_matrix(i, j)
+!				sum_rows_truncated(i) = sum_rows_truncated(i) + truncated_matrix(i, j)
+!		end do
+!	end do
+
+	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+	   a = i - myid*chunk_size
+	   do j = 1, num_states
+			sum_rows(i) = sum_rows(i) + transition_matrix(a, j)
+	   end do
 	end do
 	
 !  Compute Constant terms for Master-equations
@@ -745,10 +785,15 @@ PROGRAM RK_Solution
 	do  i = 1, num_states
 		First_term(i) = kdecs_per_s(i)*equilibrium_constants_m3(i)*C_O_per_m3*C_O2_per_m3
 		Second_term(i) = kdecs_per_s(i) + sum_rows(i)
-!		if (myid == 0) write(5000, *) i, i, Second_term(i)
-		Second_term_truncated(i) = kdecs_per_s(i) + sum_rows_truncated(i)
+!		Second_term_truncated(i) = kdecs_per_s(i) + sum_rows_truncated(i)
 	end do
 	
+	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+		a = i - myid*chunk_size
+		Second_term(i) = kdecs_per_s(i) + sum_rows(i)
+!		write(5000+myid, *) i, a, Second_term(i)
+	end do
+		
 ! Setting up and printing the initial conditions for concentrations at t=0
 	allocate(C(num_states))
 	allocate(dCdt(num_states))
@@ -758,7 +803,7 @@ PROGRAM RK_Solution
 !	do i = 1, num_states
 !		C(i) = equilibrium_constants_m3(i)*C_O_per_m3*C_O2_per_m3
 !	end do
-	
+
 	if (myid == 0) then
 	output1 = 'propagated_concentration.txt'
 	open(newunit=junit, file=output1, status='replace')
@@ -770,8 +815,6 @@ PROGRAM RK_Solution
 	iteration_counter = 0
 
 ! Compute Initial dCdt, Total dCdt and krec
-	allocate(C_tmp(num_states))
-	C_tmp = C
 	call derivs(t, C, dCdt)
 !	if (myid == 0) write(*, '(*(E19.12,1x))', advance='no') dCdt
 
@@ -780,10 +823,10 @@ PROGRAM RK_Solution
 		do  i = 1, num_states
 		   C_tot = C_tot + C(i)
 		   dCdt_tot = dCdt_tot + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
-!		   if (myid == 0) write(3000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12)')  myid+1, t, i, C(i), dCdt(i)
+!			if (myid == 0) write(3000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12)')  myid+1, t, i, C(i), dCdt(i)
 		end do
 	k_rec = dCdt_tot / (M_per_m3*(C_O_per_m3*C_O2_per_m3 - C_tot/K_eqs_tot))
-
+	
 ! Separate derivatives over K blocks at the initial moment of time 
 	allocate(dCdt_separate(K_final+1))
 	allocate(C_separate(K_final+1))
@@ -846,22 +889,22 @@ PROGRAM RK_Solution
 	allocate(Cout(num_states))
 	do while (t<=t_final)
 			  call derivs(t, C, dCdt)
-
+			  
 !			  if (iteration_counter == 1) then
 !				  do i = 1, num_states
 !!					 if (myid == 0) write(4000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12,1x,E19.12)')  myid+1, t, i, C(i), dCdt(i), k_rec
 !				  end do 
-!			  end if 
-!			  if (iteration_counter == 15) stop
+!			  end if		  
+!			  if (iteration_counter == 20) stop
 
 ! Solve the differential equation using rk4 subroutine and update variables
 			  call rk4(C, dCdt, num_states, t, h, Cout, derivs)
+			    
 			  t = t + h
 			  C = Cout 	  
 			  iteration_counter = iteration_counter + 1
-			  
+			  			  
 ! Processing and printing of the results: Total dCdt and krec
-
 			  if (mod(iteration_counter, print_freq) == 0) then			  
 				  if (print_detail .eqv. .True.) then
 					if (myid == 0) write(junit, '(*(E19.12,1x))') t, C
@@ -888,9 +931,9 @@ PROGRAM RK_Solution
 				  if (myid == 0) write(munit, '(*(E19.12,1x))') t, C_tot, C_separate
 !				  flush(nunit)
 !				  flush(munit)
-			  			  
-			  end if
 
+			  end if
+			  
 	end do
 	
 	close(junit)
@@ -908,6 +951,50 @@ PROGRAM RK_Solution
 !-------------------------------------------------------------------------------------------------------------
 
 	contains
+	
+	subroutine write_global_matrix_to_file(matrix, filename, num_procs)
+	  real*8, dimension(:, :, :) :: matrix
+	  character(len=*), intent(in) :: filename
+	  integer, intent(in) :: num_procs
+	  integer :: unit, i, j, k, chunk_size_last
+
+	  ! Open the file for writing
+	  open(newunit=unit, file=filename, status='replace')
+
+	  ! Print header
+	  do j = 1, size(matrix, 2)
+		write(unit, '(1x,I8,a1)', advance='no') j, ','
+	  end do
+	  write(unit, *)
+
+	  ! Loop over each processor
+	  do k = 1, num_procs
+		! Loop over each row of the matrix and write to the file
+		do i = (k-1)*chunk_size+1, (k-1)*chunk_size+chunk_size
+		a = i - (k-1)*chunk_size
+		
+		if (myid .eq. pe_num-1) then
+			chunk_size_last = num_states - (pe_num-1)*chunk_size
+			if (a > chunk_size_last) exit
+		end if
+		
+		if (i .gt. num_states) exit
+		
+		  ! Loop over each column of the matrix and write to the file
+		  do j = 1, size(matrix, 2)
+			if (j == 1) then
+			  write(unit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', matrix(a, j, k), ','
+			else
+			  write(unit, '(E19.12,a1,1x)', advance='no') matrix(a, j, k), ','
+			end if
+		  end do
+		  write(unit, *)
+		end do
+	  end do
+
+	  ! Close the file
+	  close(unit)
+	end subroutine write_global_matrix_to_file
 		 	
 	subroutine derivs(t, C, dCdt)
 		use mpi
@@ -916,21 +1003,36 @@ PROGRAM RK_Solution
 		real*8, intent(out) :: dCdt(num_states)
 		real*8 :: dCdt_myid(chunk_size), dCdt_myid2(chunk_size, pe_num)
 		real*8 Third_term
+		integer :: chunk_size_last
 		
 		myid_counter = 0
 		dCdt_myid = 0
 ! Calculate the derivatives dC/dt
 ! Loop over final states, same as equation numbers:
-		do i = myid+1, num_states, pe_num
+!		do i = myid+1, num_states, pe_num
+		do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+		a = i - myid*chunk_size
+		
+		if (myid .eq. pe_num-1) then
+			chunk_size_last = num_states - (pe_num-1)*chunk_size
+			if (a > chunk_size_last) exit
+!			if (a > chunk_size_last) goto 30
+		end if
+		
 		myid_counter = myid_counter + 1
+!		print*, a, myid_counter
 !		do i = 1, num_states
 ! calculate sum for individual state - Third_term		
 			Third_term = 0 ! Initialize Third_term for this state			
 ! Loop over initial states, all terms of the summ:
 				if (truncation .eqv. .False.) then
-					do j = 1, num_states 
-						Third_term = Third_term + transition_matrix(j, i) * C(j)
+					do j = 1, num_states 					
+!						Third_term = Third_term + transition_matrix(j, a) * C(j)
+						Third_term = Third_term + transition_matrix(a, j)*(equilibrium_constants_m3(i)/equilibrium_constants_m3(j))*C(j)
+!					if (myid .eq. pe_num-1) stop 
+!					write(myid*1000+1, '(I8,1x,I8,1x,E20.12,1x,E20.12,1x,I8)') i, j, transition_matrix(a, j)*(equilibrium_constants_m3(i)/equilibrium_constants_m3(j)), C(j), a	
 					end do
+									
 				else
 !					istart(i) = max(1, i-band_width/2)
 !					ifinish(i) = min(i+band_width/2, num_states)
@@ -944,34 +1046,35 @@ PROGRAM RK_Solution
 			if (truncation .eqv. .False.) then
 				dCdt_myid(myid_counter) = First_term(i) - Second_term(i)*C(i) + Third_term
 !				dCdt(i) = First_term(i) - Second_term(i)*C(i) + Third_term
-!			write(myid*1000+1, '(I8,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12,1x,I8,1x,E20.12)') i, First_term(i), Second_term(i), C(i), dCdt_myid(myid_counter), myid_counter, Third_term
+!			write(myid*1000+1, '(I8,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12,1x,I8,1x,E20.12)') i, First_term(i), Second_term(i), C(i), dCdt_myid(myid_counter), myid_counter, Third_term				
 			else
 				dCdt_myid(myid_counter) = First_term(i) - Second_term_truncated(i)*C(i) + Third_term			
 !				dCdt(i) = First_term(i) - Second_term_truncated(i)*C(i) + Third_term
 			end if
 			
 		end do
-!			write(myid*1000+1, *) dCdt_myid
-			
-			call MPI_GATHER(dCdt_myid, chunk_size, MPI_REAL8, dCdt_myid2, chunk_size, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+		
+			call MPI_GATHER(dCdt_myid, chunk_size, MPI_REAL8, dCdt_myid2, chunk_size, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)			
 			call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
-			
+						
 !			if (myid == 0) write(1000, *)  dCdt_myid2
 			 
 			if (myid == 0 ) then 
-				 do i = 1, chunk_size
-					do j = 1, pe_num
-						counter = (i-1)*pe_num + j
+				do j = 1, pe_num
+					do i = 1, chunk_size
+						counter = (j-1)*chunk_size + i
 						dCdt(counter) = dCdt_myid2(i, j)
+!						write(1000, *)  dCdt(counter), counter						
 					end do
 				 end do
 			end if 
-			 
+					
 			call MPI_BCAST(dCdt, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
 			call MPI_BARRIER(MPI_COMM_WORLD, ierr_a)
-			
+						
 !			if (myid == 0) write(1002, '(*(E19.12,1x))', advance='no') dCdt
 !			dCdt = First_term - kdecs_per_s*C + MATMUL(modified_transition_matrix_per_s_transposed, C)
+			
 	end subroutine derivs
 	
 	subroutine rk4(y,dydx,n,x,h,yout,derivs)
@@ -992,13 +1095,13 @@ PROGRAM RK_Solution
 	11    continue  
 
 	   call derivs(xh,yt,dyt)  
-
+	   
 	   do 12 i=1,n  
 		 yt(i)=y(i)+hh*dyt(i)  
 	12    continue  
 
 	   call derivs(xh,yt,dym)  
-
+	   
 	   do 13 i=1,n  
 		 yt(i)=y(i)+h*dym(i)  
 		 dym(i)=dyt(i)+dym(i)  
@@ -1018,30 +1121,70 @@ PROGRAM RK_Solution
 		real*8, dimension(:), intent(in) :: Energies(:)
 		real*8, dimension(:), intent(in) :: Cov(:), Vdw(:), Inf(:)
 		real*8 :: dE_down, dE_up
-		real*8 :: ptran
+		real*8 :: ptran, matrix_tmp
 		real*8, allocatable, dimension(:, :) :: matrix
-		integer :: i, j
-		
-		allocate(matrix(num_states, num_states))
+		integer :: i, j, a, chunk_size_last
+	
+!		allocate(matrix(num_states, num_states))
+		allocate(matrix(chunk_size, num_states))
 		matrix = 0
 		
-		do j = 1, size(matrix, 2)
-		   do i = 1, j-1
+!		do j = 1, size(matrix, 2)
+		do j = myid*chunk_size+1, myid*chunk_size+chunk_size
+		a = j - myid*chunk_size
+		
+		if (j > num_states) exit
+		
+		if (myid .eq. pe_num-1) then
+			chunk_size_last = num_states - (pe_num-1)*chunk_size
+			if (a > chunk_size_last) goto 40
+		end if		
+		
+		do i = 1, num_states
+!		   do i = 1, j-1
 			  ptran = Cov(i)*Cov(j) + Vdw(i)*Vdw(j)! + Inf(i)*Inf(j)
 			  dE_up = get_dE_up(dE_down, temp_k, Energies(i), Energies(j), equilibrium_constants_m3(i), equilibrium_constants_m3(j))
 			  if (Energies(j) > Energies(i)) then
-!				matrix(i, j) = ptran * exp((Energies(i) - Energies(j)) / dE_up)
-				matrix(j, i) = ptran * exp((Energies(j) - Energies(i)) / dE_down)
-				matrix(i, j) = matrix(j, i) * eq_concs(j) / eq_concs(i)	
+				matrix(a, i) = ptran * exp((Energies(j) - Energies(i)) / dE_down)
 			  else if (Energies(j) < Energies(i)) then
-				matrix(i, j) = ptran * exp((Energies(i) - Energies(j)) / dE_down)
-!				matrix(j, i) = ptran * exp((Energies(j) - Energies(i)) / dE_up)
-				matrix(j, i) = matrix(i, j) * eq_concs(i) / eq_concs(j)
-			  end if 
+				matrix_tmp = ptran * exp((Energies(i) - Energies(j)) / dE_down)
+				matrix(a, i) = matrix_tmp * eq_concs(i) / eq_concs(j)
+!				matrix(a, i) = ptran * exp((Energies(j) - Energies(i)) / dE_up)
+			  else 
+				matrix(a, i) = 0
+			  end if
 		   end do
 		end do
-	
-	end function calculate_transition_matrix_unitless
+
+!40		call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
+
+!! 		  Print header
+!		  do i = 1, size(matrix, 2)
+!			write(myid+100, '(1x,I8,a1)', advance='no') i, ','
+!		  end do
+!		  write(myid+100, *)
+!
+!			! Loop over each row of the matrix and write to the file
+!			do j = myid*chunk_size+1, myid*chunk_size+chunk_size
+!			a = j - myid*chunk_size
+!			
+!			if (myid .eq. pe_num-1) then
+!				chunk_size_last = num_states - (pe_num-1)*chunk_size
+!				if (a > chunk_size_last) exit
+!			end if
+!		
+!			  ! Loop over each column of the matrix and write to the file
+!			  do i = 1, size(matrix, 2)				
+!				if (i == 1) then
+!				  write(myid+100, '(I8,a1,1x,E19.12,a1,1x)', advance='no') j, ',', matrix(a, i), ','
+!				else
+!				  write(myid+100, '(E19.12,a1,1x)', advance='no') matrix(a, i), ','
+!				end if
+!			  end do
+!			  write(myid+100, *)
+!			end do
+		
+40	end function calculate_transition_matrix_unitless
 	   
 	subroutine readFWCFile(filepath, Energy_per_cm, Total_Gamma_per_cm, Covalent_All, Vdw_all, Infty, A_per_cm, &
 			   B_per_cm, C_per_cm, numDataPoints)
