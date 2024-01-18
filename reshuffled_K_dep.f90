@@ -35,7 +35,7 @@ PROGRAM RK_Solution
 	real*8, dimension(:, :, :), allocatable :: transition_matrix_3D
 	integer, dimension(:, :), allocatable :: state_pointer
 	real*8, dimension(:), allocatable :: First_term, Second_term, Second_term_truncated, sum_rows, &
-	threshold_Energies_K, sum_rows_truncated, Second_term_main
+	threshold_Energies_K, sum_rows_truncated, Second_term_main, First_term_myid, Second_term_myid
 	real*8 :: h_j_per_s, hbar_js, c_cm_per_s, C_O_per_m3, C_O2_per_m3, temp_k
 	real*8 :: part_funcs_o2_per_m3
 	character(len=3) :: o3_molecule
@@ -588,7 +588,6 @@ PROGRAM RK_Solution
 	
 	call cpu_time(start_time_matrix)
 	! Compute and print transition matrix	
-!	allocate(transition_matrix(chunk_size, num_states))
 	allocate(transition_matrix(num_states, chunk_size))
 	transition_matrix = calculate_transition_matrix_unitless(Energies, Covalent_All, Vdw_All, Infinity_All, dE_down)
 
@@ -773,14 +772,19 @@ PROGRAM RK_Solution
 !	end do
 
 	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-		a = i - myid*chunk_size
-		do j = 1, num_states		
-			sum_rows(i) = sum_rows(i) + transition_matrix(j, a)*(equilibrium_constants_m3(j)/equilibrium_constants_m3(i))
-!			write(myid*1000+1, *) a, j, transition_matrix(j, a)			
-		end do   
-!		write(myid*1000+1, *) i, sum_rows(i)		
-	end do 
-		
+	   a = i - myid*chunk_size
+	   do j = 1, num_states
+		sum_rows(i) = sum_rows(i) + transition_matrix(j, a)*(equilibrium_constants_m3(j)/equilibrium_constants_m3(i))
+	   end do
+!	   write(myid*1000+1, *) i, sum_rows(i)		   
+	end do
+
+!	do i = 1, chunk_size
+!	   do j = 1, num_states
+!		sum_rows(i) = sum_rows(i) + transition_matrix(i, j)
+!	   end do
+!	end do
+	
 !  Compute Constant terms for Master-equations
 	allocate(First_term(num_states))
 	allocate(Second_term(num_states))
@@ -794,7 +798,16 @@ PROGRAM RK_Solution
 	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
 		a = i - myid*chunk_size
 		Second_term(i) = kdecs_per_s(i) + sum_rows(i)
-	!	write(1000*myid+1, *) i, a, Second_term(i)
+	end do
+	
+	allocate(First_term_myid(chunk_size))
+	do i = 1, chunk_size
+		First_term_myid(i) = First_term(myid*chunk_size + i)
+	end do	
+	
+	allocate(Second_term_myid(chunk_size))
+	do i = 1, chunk_size
+		Second_term_myid(i) = Second_term(myid*chunk_size + i)
 	end do
 		
 ! Setting up and printing the initial conditions for concentrations at t=0
@@ -819,14 +832,12 @@ PROGRAM RK_Solution
 
 ! Compute Initial dCdt, Total dCdt and krec
 	call derivs(t, C, dCdt)
-!	if (myid == 0) write(*, '(*(E19.12,1x))', advance='no') dCdt
 
 	C_tot = 0
 	dCdt_tot = 0
 		do  i = 1, num_states
 		   C_tot = C_tot + C(i)
 		   dCdt_tot = dCdt_tot + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
-!			if (myid == 0) write(3000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12)')  myid+1, t, i, C(i), dCdt(i)
 		end do
 	k_rec = dCdt_tot / (M_per_m3*(C_O_per_m3*C_O2_per_m3 - C_tot/K_eqs_tot))
 	
@@ -897,9 +908,9 @@ PROGRAM RK_Solution
 				  do i = 1, num_states
 !					 if (myid == 0) write(4000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12,1x,E19.12)')  myid+1, t, i, C(i), dCdt(i), k_rec
 				  end do 
-			  end if
-			  if (iteration_counter == 5) stop
-
+			  end if		  
+			  if (iteration_counter == 5) stop			  
+			  
 ! Solve the differential equation using rk4 subroutine and update variables
 			  call rk4(C, dCdt, num_states, t, h, Cout, derivs)
 			    
@@ -1005,77 +1016,58 @@ PROGRAM RK_Solution
 		real*8, intent(in) :: t, C(num_states)
 		real*8, intent(out) :: dCdt(num_states)
 		real*8 :: dCdt_myid(chunk_size), dCdt_myid2(chunk_size, pe_num)
-		real*8 Third_term
+		real*8 Third_term(chunk_size), C_myid(chunk_size)
 		integer :: chunk_size_last
+
+		chunk_size_last = num_states - (pe_num-1)*chunk_size
 		
-!		do i = 1, chunk_size
-!			write(myid*1000+1,'(9(E20.12))') (transition_matrix(j, i), j = 1, num_states)
-!		end do
-			
-!		write(myid*1000+1,'(9(E20.12))') (C(j), j = 1, num_states)		
-		
-		myid_counter = 0
-		dCdt_myid = 0
 ! Calculate the derivatives dC/dt
 ! Loop over final states, same as equation numbers:
-		do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-		a = i - myid*chunk_size
+		Third_term = 0d0
 		
-		if (myid .eq. pe_num-1) then
-			chunk_size_last = num_states - (pe_num-1)*chunk_size
-			if (a > chunk_size_last) exit
-		end if
-		
-		myid_counter = myid_counter + 1
-! calculate sum for individual state - Third_term		
-			Third_term = 0 ! Initialize Third_term for this state			
-! Loop over initial states, all terms of the summ:
-				if (truncation .eqv. .False.) then
-					do j = 1, num_states 					
-						Third_term = Third_term + transition_matrix(j, a) * C(j)
-!						Third_term = Third_term + transition_matrix(a, j)*(equilibrium_constants_m3(i)/equilibrium_constants_m3(j))*C(j)	
-!						write(myid*1000+1,'(I8,1x,I8,1x,E20.12)') i, j, transition_matrix(j, a)					
-					end do
-				else
-!					istart(i) = max(1, i-band_width/2)
-!					ifinish(i) = min(i+band_width/2, num_states)
-					do j = istart(i), ifinish(i) 
-!					do j = 1, cutoff_count(i)
-!						Third_term = Third_term + truncated_matrix(j, i) * C(state_pointer(j,i))
-						Third_term = Third_term + transition_matrix(j, i) * C(j)
-					end do
-				end if
-			if (truncation .eqv. .False.) then
-				dCdt_myid(myid_counter) = First_term(i) - Second_term(i)*C(i) + Third_term
-!				write(myid*1000+1,'(I8,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12)') myid_counter, dCdt_myid(myid_counter), First_term(i), Second_term(i), C(i), Third_term
-			else
-				dCdt_myid(myid_counter) = First_term(i) - Second_term_truncated(i)*C(i) + Third_term			
-			end if
+		do i = 1, chunk_size
+			do j = 1, num_states
+				Third_term(i) = Third_term(i) + transition_matrix(j, i)*C(j)
+			end do
 		end do
 		
-!			write(myid*1000+1,'(9(E20.12))') (dCdt_myid(j), j = 1, num_states)
+		do i = 1, chunk_size
+			C_myid(i) = C(myid*chunk_size + i)
+		end do
+
+		do i = 1, chunk_size
+			if (myid .eq. pe_num-1 .and. i > chunk_size_last) exit
+			dCdt_myid(i) = First_term_myid(i) - Second_term_myid(i)*C_myid(i) + Third_term(i)
+!			write(myid*1000+1,'(I8,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12)') i, dCdt_myid(i), First_term_myid(i), Second_term_myid(i), C_myid(i), Third_term(i)			
+		end do
 		
-			call MPI_GATHER(dCdt_myid, chunk_size, MPI_REAL8, dCdt_myid2, chunk_size, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)			
-			call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
-									 
-			if (myid == 0 ) then 
-				do j = 1, pe_num
-					do i = 1, chunk_size
-						counter = (j-1)*chunk_size + i
-						dCdt(counter) = dCdt_myid2(i, j)
-!					write(1000, *) counter, dCdt(counter)						
-					end do
-				 end do
-			end if 
-
-			call MPI_BCAST(dCdt, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
-			call MPI_BARRIER(MPI_COMM_WORLD, ierr_a)
-
-!			write(myid*1000+1,'(9(E20.12))') (dCdt(j), j = 1, num_states)
-!			stop 
-						
-!			dCdt = First_term - kdecs_per_s*C + MATMUL(modified_transition_matrix_per_s_transposed, C)
-			
+!		write(myid*1000+1,'(9(E20.12))') (dCdt_myid(j), j = 1, num_states)
+		
+		call MPI_GATHER(dCdt_myid, chunk_size, MPI_REAL8, dCdt_myid2, chunk_size, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)			
+		call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
+								 
+		if (myid == 0 ) then 
+			do j = 1, pe_num
+				do i = 1, chunk_size
+					counter = (j-1)*chunk_size + i
+					if (counter .gt. num_states) goto 90
+					dCdt(counter) = dCdt_myid2(i, j)
+!					write(1000, *) counter, dCdt(counter)
+				end do
+			 end do
+90 			end if 
+				
+!		if (myid == 0 ) then 
+!			do counter = 1, num_states
+!				j = int(counter/chunk_size) + 1
+!				i = counter - chunk_size*(j-1)
+!				dCdt(counter) = dCdt_myid2(i, j)
+!			 end do
+!		end if 
+				
+		call MPI_BCAST(dCdt, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+		call MPI_BARRIER(MPI_COMM_WORLD, ierr_a)
+							
 	end subroutine derivs
 	
 	subroutine rk4(y,dydx,n,x,h,yout,derivs)
@@ -1116,77 +1108,6 @@ PROGRAM RK_Solution
 	   return  
 	end subroutine rk4
 	  
-!	function calculate_transition_matrix_unitless(Energies, Cov, Vdw, Inf, dE_down) result(matrix)
-!! Calculates unitless state-to-state transition matrix (matrix(i, j) = kappa i->j)
-!! dE = [down, up]
-!		real*8, dimension(:), intent(in) :: Energies(:)
-!		real*8, dimension(:), intent(in) :: Cov(:), Vdw(:), Inf(:)
-!		real*8 :: dE_down, dE_up
-!		real*8 :: ptran, matrix_tmp
-!		real*8, allocatable, dimension(:, :) :: matrix
-!		integer :: i, j, a, chunk_size_last
-!	
-!!		allocate(matrix(num_states, num_states))
-!		allocate(matrix(chunk_size, num_states))
-!		matrix = 0
-!		
-!!		do j = 1, size(matrix, 2)
-!		do j = myid*chunk_size+1, myid*chunk_size+chunk_size
-!		a = j - myid*chunk_size
-!		
-!		if (j > num_states) exit
-!		
-!		if (myid .eq. pe_num-1) then
-!			chunk_size_last = num_states - (pe_num-1)*chunk_size
-!			if (a > chunk_size_last) goto 40
-!		end if		
-!		
-!		do i = 1, num_states
-!!		   do i = 1, j-1
-!			  ptran = Cov(i)*Cov(j) + Vdw(i)*Vdw(j)! + Inf(i)*Inf(j)
-!			  dE_up = get_dE_up(dE_down, temp_k, Energies(i), Energies(j), equilibrium_constants_m3(i), equilibrium_constants_m3(j))
-!			  if (Energies(j) > Energies(i)) then
-!				matrix(a, i) = ptran * exp((Energies(j) - Energies(i)) / dE_down)
-!			  else if (Energies(j) < Energies(i)) then
-!				matrix_tmp = ptran * exp((Energies(i) - Energies(j)) / dE_down)
-!				matrix(a, i) = matrix_tmp * eq_concs(i) / eq_concs(j)
-!!				matrix(a, i) = ptran * exp((Energies(j) - Energies(i)) / dE_up)
-!			  else 
-!				matrix(a, i) = 0
-!			  end if
-!		   end do
-!		end do
-!
-!!40		call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
-!
-!!! 		  Print header
-!!		  do i = 1, size(matrix, 2)
-!!			write(myid+100, '(1x,I8,a1)', advance='no') i, ','
-!!		  end do
-!!		  write(myid+100, *)
-!!
-!!			! Loop over each row of the matrix and write to the file
-!!			do j = myid*chunk_size+1, myid*chunk_size+chunk_size
-!!			a = j - myid*chunk_size
-!!			
-!!			if (myid .eq. pe_num-1) then
-!!				chunk_size_last = num_states - (pe_num-1)*chunk_size
-!!				if (a > chunk_size_last) exit
-!!			end if
-!!		
-!!			  ! Loop over each column of the matrix and write to the file
-!!			  do i = 1, size(matrix, 2)				
-!!				if (i == 1) then
-!!				  write(myid+100, '(I8,a1,1x,E19.12,a1,1x)', advance='no') j, ',', matrix(a, i), ','
-!!				else
-!!				  write(myid+100, '(E19.12,a1,1x)', advance='no') matrix(a, i), ','
-!!				end if
-!!			  end do
-!!			  write(myid+100, *)
-!!			end do
-!		
-!40	end function calculate_transition_matrix_unitless
-
 	function calculate_transition_matrix_unitless(Energies, Cov, Vdw, Inf, dE_down) result(matrix)
 ! Calculates unitless state-to-state transition matrix (matrix(j, i) = kappa j->i)
 ! dE = [down, up]
