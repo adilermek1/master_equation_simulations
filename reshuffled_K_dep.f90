@@ -14,13 +14,14 @@ PROGRAM RK_Solution
 	real*8, dimension(:), allocatable:: C, dCdt, Cout, kdecs_per_s, C_separate, dCdt_separate, C_equilibrium_separate, part_funcs, &
 	eq_conc
 	character(100) :: output, output1, output2, output3, output4, output5, output6, output7, output8, output9, output10, output11
-	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, cunit, dunit, eunit, funit, j, unit, n, last_bound, k, gunit
+	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, cunit, dunit, eunit, funit, j, unit, n, last_bound, k, gunit, hunit, &
+	wunit, zunit
 	integer :: unit_K0, unit_K1, unit_K2, unit_K3, unit_K4, unit_K5, unit_K6, unit_K7, &
 	unit_K8, unit_K9, unit_K10, unit_K11, unit_K12, unit_K13, unit_K14, unit_K15, unit_K16, &
 	unit_K17, unit_K18, unit_K19, unit_K20, a, counter
 	
 ! Parameters for kinetics
-	character(len=100) :: directory, filename 
+	character(len=200) :: directory, filename 
 	
 	character(len=200) :: filepath, filepath_K0, filepath_K1, filepath_K2, filepath_K3, filepath_K4, filepath_K5, filepath_K6, &
 	filepath_K7, filepath_K8, filepath_K9, filepath_K10, filepath_K11, filepath_K12, filepath_K13, filepath_K14, filepath_K15, &
@@ -31,7 +32,7 @@ PROGRAM RK_Solution
 	
 	real*8, dimension(:), allocatable :: Energies, Gammas, Covalent_All, Vdw_All, Infinity_All, equilibrium_constants_m3, eq_concs
 	real*8, dimension(:, :), allocatable :: truncated_matrix
-	real*8, dimension(:, :), allocatable :: transition_matrix, Second_term_2d
+	real*8, dimension(:, :), allocatable :: transition_matrix, Second_term_2d, symmetric_matrix
 	real*8, dimension(:, :, :), allocatable :: transition_matrix_3D
 	integer, dimension(:, :), allocatable :: state_pointer
 	real*8, dimension(:), allocatable :: First_term, Second_term, Second_term_truncated, sum_rows, &
@@ -49,8 +50,8 @@ PROGRAM RK_Solution
 	real*8 :: k_rec, lower_energy_lim, upper_energy_lim, upper_gamma_lim, lower_gamma_lim
 	integer :: threshold_j, Js, Ks, vib_sym_well, iteration_counter, print_freq, K_initial, K_final, band_width, K_exact
 	integer, dimension(:), allocatable :: num_states_K, K_value, threshold_j_values, Resonance, num_counter_K, &
-	unit_K, ios_K, istart, ifinish, cutoff_count, J_value, sym_value
-	
+	unit_K, ios_K, istart, ifinish, cutoff_count, J_value, sym_value, istart_new, ifinish_new, istart_new_rever, ifinish_new_rever
+	real*8, dimension(:), allocatable :: J_rot
 	real*8 :: start_time, end_time, end_time1, end_time2, end_time3, tmp_energies, tmp_gammas, tmp_covalent_all, &
 	tmp_vdw_all, tmp_infinity_all, tmp_k_value, tmp_resonance, kt_energy_j, dE_down, kij_min, start_time_matrix, &
 	end_time_matrix, start_time_master_eq, end_time_master_eq, C_initial_O3_per_m3, &
@@ -72,16 +73,18 @@ PROGRAM RK_Solution
 	call MPI_COMM_SIZE(MPI_COMM_WORLD, pe_num, ierr_a)
 !	myid = 0
 	if (myid == 0) print *, pe_num, "Number of processors"
+	
+!	write(myid*1000+1, *) 'I am processor #' , myid+1
 		
 	call cpu_time(start_time)
 	
-	barrier_directory = '/mmfs1/home/3436yermeka/kinetics/barrier_energies'
+	barrier_directory = '/global/u2/a/adil/ozone_kinetics/data/barriers/666'
 	barrier_filename = 'barrier_energies.csv'
 	barrier_filepath = trim(barrier_directory) // '/' // trim(barrier_filename)
 	
 	barrier_energies_matrix = read_matrix(barrier_filepath)
 	
-	! Print the matrix
+!   Print the matrix
 !	if (myid == 0) then
 !	do i = 1, barrier_rows
 !			write(*, '(65(1x,E21.14))') barrier_energies_matrix(i, :)
@@ -108,7 +111,7 @@ PROGRAM RK_Solution
 	C_O_per_m3 = 6.44e+18
 	C_O2_per_m3 = 6.44e+20
 	M_per_m3 = 10000*6.44e+24
-	C_initial_O3_per_m3 = 9999 !82510272735.4575
+	C_initial_O3_per_m3 = 0 !9999 ! 82510272735.4575
 	
 ! Pressure related parameters
 	ref_pressure_per_m3 = 6.44e+24
@@ -127,12 +130,12 @@ PROGRAM RK_Solution
 	kt_energy_cm = temp_k * cm_per_k
 	
 ! Energy Spectrum Parameters in wave numbers	
-	lower_energy_lim = -30
-	upper_energy_lim = 30
+	lower_energy_lim = -3000
+	upper_energy_lim = 300
 	upper_gamma_lim = 200
 	lower_gamma_lim = 0.d0 ! 10**(-2)
 
-! Ozone isotope Labels	
+! Ozone isotope Labels
 	o3_molecule = "666"
 	o2_molecule = "66"
 	o_atom = "6"
@@ -143,29 +146,30 @@ PROGRAM RK_Solution
 ! Initial and final time and time step
 	t0 = 0.0d0
 ! 0.01*1000e-9 / pressure_ratio = 1e-12 in case of 10000std of M_per_m3
-	t_final = 1.4e-12 !135e-14 ! 1.35*0.01*1000e-9 / pressure_ratio
-	h = 0.001*1e-13 !100e-20 ! 1*1e-9 / (pressure_ratio)
+	t_final = 0.07e-12 !135e-14 ! 1.35*0.01*1000e-9 / pressure_ratio
+	h = 100e-20 !0.001*1e-13! 1*1e-9 / (pressure_ratio)
 	band_width = 10
 	print_freq = 1
-	print_detail = .True.
+	print_detail = .False.
 	truncation = .False.
 	K_dependent = .False.
-	print_transition_matrix = .True.
-	
+	print_transition_matrix = .False.
+	kij_min = 1.d-4 ! 0.1
+
 ! Specify the directory and file name  
 	filename = "state_properties.fwc"
 
 	num_states = 0	
-	J_initial = 24
-	J_final = 24
-	K_exact = 0
+	J_initial = 16
+	J_final = 26
+	K_exact = 5
 	
 	K_initial = 0
 	K_step = 1
 	
 	K_final_last = 20
 	vib_sym_well_start = 0
-	vib_sym_well_last = 0
+	vib_sym_well_last = 1
 	
 	allocate(num_states_J_K_sym(J_final+1, K_final_last+1, vib_sym_well_last+1))
 	num_states_J_K_sym = 0
@@ -185,7 +189,7 @@ PROGRAM RK_Solution
 			
 			do Ks = K_initial, K_final, K_step
 				write(Ks_string, '(I0)') Ks
-				directory = "/mmfs1/home/3436yermeka/ozone_kinetics/data/resonances/mol_666/"				
+				directory = "/global/u2/a/adil/ozone_kinetics/data/resonances/mol_666/"				
 				if (vib_sym_well == 0) then
 					! vib_sym_well = 0
 					if (mod(Ks, 2) == 0) then
@@ -202,7 +206,7 @@ PROGRAM RK_Solution
 							! Open and read the file with kinetics data
 							open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
 							! Skip the first line
-							read(unit, *)
+							read(unit, *, iostat=ios)
 							! Count the number of data points
 							do
 								read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
@@ -235,7 +239,7 @@ PROGRAM RK_Solution
 							! Open and read the file with kinetics data
 							open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
 							! Skip the first line
-							read(unit, *)
+							read(unit, *, iostat=ios)
 							! Count the number of data points
 							do
 								read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
@@ -271,7 +275,7 @@ PROGRAM RK_Solution
 							! Open and read the file with kinetics data
 							open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
 							! Skip the first line
-							read(unit, *)
+							read(unit, *, iostat=ios)
 							! Count the number of data points
 							do
 								read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
@@ -304,7 +308,7 @@ PROGRAM RK_Solution
 							! Open and read the file with kinetics data
 							open(newunit=unit, file=filepath, status='old', action='read', iostat=ios)
 							! Skip the first line
-							read(unit, *)
+							read(unit, *, iostat=ios)
 							! Count the number of data points
 							do
 								read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
@@ -327,7 +331,7 @@ PROGRAM RK_Solution
 			end do
 		end do
 	end do
-	
+	 
 	if (myid == 0) then
 	write(*, *) "Total number of states", num_states
 	end if
@@ -382,11 +386,10 @@ PROGRAM RK_Solution
 			do Ks = K_initial, K_final, K_step
 				open(newunit=unit_J_K_sym(Js+1, Ks+1, vib_sym_well+1), file=filepath_JKsym(Js+1, Ks+1, vib_sym_well+1), &
 				status='old', iostat=ios_J_K_sym(Js+1, Ks+1, vib_sym_well+1))
-				read(unit_J_K_sym(Js+1, Ks+1, vib_sym_well+1), *)			
+				read(unit_J_K_sym(Js+1, Ks+1, vib_sym_well+1), *, iostat=ios_J_K_sym(Js+1, Ks+1, vib_sym_well+1))			
 			end do
 		end do
 	end do
-	
 	
 ! Read and store filtered data
 	do vib_sym_well = vib_sym_well_start, vib_sym_well_last
@@ -566,7 +569,8 @@ PROGRAM RK_Solution
 	open(newunit=iunit, file=output, status='replace')
 	do j = 1, num_states
 !		if (K_value(j) == 0) then
-		write(iunit, '((I8, 1x, E19.12, 1x, E19.12, 1x, I8, 1x, I8, 1x, I8, 1x, I8, 1x, E19.12, 1x, E19.12, 1x, E19.12, 1x, E19.12))') j, &
+		write(iunit, &
+		'((I8, 1x, E19.12, 1x, E19.12, 1x, I8, 1x, I8, 1x, I8, 1x, I8, 1x, E19.12, 1x, E19.12, 1x, E19.12, 1x, E19.12))') j, &
 			Energies(j), Gammas(j), J_value(j), K_value(j), sym_value(j), Resonance(j), Covalent_All(j), &
 			Vdw_All(j), Infinity_All(j), equilibrium_constants_m3(j)			
 			flush(iunit)
@@ -574,7 +578,13 @@ PROGRAM RK_Solution
 	end do
 	close(iunit)
 	end if
-
+	
+	allocate(J_rot(num_states))
+	J_rot = 0.d0
+	do i = 1, num_states
+		J_rot(i) = J_value(i)
+	end do
+	
 ! Sum of equilibrium constants
 	K_eqs_tot = 0
 	do  i = 1, num_states
@@ -587,12 +597,12 @@ PROGRAM RK_Solution
 	end do	
 	
 	call cpu_time(start_time_matrix)
-	! Compute and print transition matrix	
+! Compute and print transition matrix	
 	allocate(transition_matrix(num_states, chunk_size))
 	transition_matrix = calculate_transition_matrix_unitless(Energies, Covalent_All, Vdw_All, Infinity_All, dE_down)
 
 ! Scaling of the matrices
-	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
+!	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
 
 !	output11 = 'distribution_of_concentrations_over_kij_kji.txt'
 !	open(newunit=gunit, file=output11, status='replace')
@@ -609,28 +619,28 @@ PROGRAM RK_Solution
 !	close(gunit)
 	
 	
-!	if (myid == 0) then
-!		if (print_transition_matrix .eqv. .True.) then
-!			output2 = 'transition_matrix.csv'
-!			open(newunit=kunit, file=output2, status='replace')
-!			do j = 1, size(transition_matrix, 1)
-!				write(kunit, '(1x,I8,a1)', advance='no') j, ','
-!			end do
-!				write (kunit, *)
-!			
-!			do i = 1, size(transition_matrix, 1)
-!				do j = 1, size(transition_matrix, 2)
-!				 if (j == 1) then
-!					write(kunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', transition_matrix(i, j), ','
-!				 else 
-!					write(kunit, '(E19.12,a1,1x)', advance='no') transition_matrix(i, j), ',' 
-!				 end if
-!				end do
-!				write (kunit, *)
-!			end do
-!			close(kunit)
-!		end if
-!	end if
+	if (myid == 0) then
+		if (print_transition_matrix .eqv. .True.) then
+			output2 = 'transition_matrix.csv'
+			open(newunit=kunit, file=output2, status='replace')
+			do j = 1, size(transition_matrix, 1)
+				write(kunit, '(1x,I8,a1)', advance='no') j, ','
+			end do
+				write (kunit, *)
+			
+			do i = 1, size(transition_matrix, 1)
+				do j = 1, size(transition_matrix, 2)
+				 if (j == 1) then
+					write(kunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', transition_matrix(j, i), ','
+				 else 
+					write(kunit, '(E19.12,a1,1x)', advance='no') transition_matrix(j, i), ',' 
+				 end if
+				end do
+				write (kunit, *)
+			end do
+			close(kunit)
+		end if
+	end if
 
 !! Counting the elements which are greater than cuttoff value in the transition matrix
 !	output7 = 'cuttoff_count_numbers.out'
@@ -639,9 +649,8 @@ PROGRAM RK_Solution
 !	open(newunit=dunit, file=output8, status='replace')
 !	output9 = 'state_pointer.csv'
 !	open(newunit=eunit, file=output9, status='replace')
-!	
+	
 !	cutoff_count_max = 0
-!	kij_min = 0.1
 !	
 !	allocate(istart(num_states))
 !	allocate(ifinish(num_states))
@@ -652,7 +661,7 @@ PROGRAM RK_Solution
 !	cutoff_count = 0
 !	state_pointer = 0
 !	truncated_matrix = 0
-!	
+	
 !	do i = 1, num_states
 !!	  istart(i) = 0
 !		do j = 1, num_states
@@ -666,10 +675,10 @@ PROGRAM RK_Solution
 !!			 if (istart(i) .eq. 0) istart(i) = j			 
 !			 end if
 !		end do
-!				
+				
 !		if (cutoff_count(i) .gt. cutoff_count_max) cutoff_count_max = cutoff_count(i)
 !	end do
-!
+
 !! Finding istart indexes	
 !	do i = 1, num_states
 !		istart(i) = 0
@@ -684,29 +693,29 @@ PROGRAM RK_Solution
 !	end do
 !	if (myid == 0) write(cunit, *) cutoff_count_max
 !	close(cunit)
-!
+
 !! Print truncation matrix
 !	if (myid == 0) then
-!		if (print_transition_matrix .eqv. .True.) then	
-!			do j = 1, cutoff_count_max
-!				write(dunit, '(1x,I8,a1)', advance='no') j, ','
+!	if (print_transition_matrix .eqv. .True.) then	
+!		do j = 1, num_states !cutoff_count_max
+!			write(dunit, '(1x,I8,a1)', advance='no') j, ','
+!		end do
+!			write (dunit, *)
+!		
+!		do i = 1, size(truncated_matrix, 1)
+!			do j = 1, num_states !cutoff_count_max
+!			 if (j == 1) then
+!				write(dunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', truncated_matrix(j, i), ','
+!			 else 
+!				write(dunit, '(E19.12,a1,1x)', advance='no') truncated_matrix(j, i), ',' 
+!			 end if
 !			end do
 !				write (dunit, *)
-!			
-!			do i = 1, size(truncated_matrix, 1)
-!				do j = 1, cutoff_count_max
-!				 if (j == 1) then
-!					write(dunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', truncated_matrix(j, i), ','
-!				 else 
-!					write(dunit, '(E19.12,a1,1x)', advance='no') truncated_matrix(j, i), ',' 
-!				 end if
-!				end do
-!					write (dunit, *)
-!			end do
-!			close(dunit)
-!		end if
+!		end do
+!		close(dunit)
 !	end if
-!
+!end if
+
 !! Print state_pointer matrix
 !	if (myid == 0) then
 !		if (print_transition_matrix .eqv. .True.) then	
@@ -728,36 +737,109 @@ PROGRAM RK_Solution
 !			close(eunit)
 !		end if
 !	end if
-	
-	
-	
+			
 	call cpu_time(end_time_matrix)
 	if (myid == 0) write(*, *) "Time for calculating and writing matricies (transition, truncation and state pointer):", &
 	end_time_matrix-start_time_matrix, "seconds"
 	
+!! Allocate global transition matrix
+!	if (myid .eq. 0) then
+!		allocate(transition_matrix_3D(num_states, chunk_size, pe_num))
+!		transition_matrix_3D = 0
+!	end if
+!	
+!! Gather local transition matrix from all processes to global transition matrix
+!	call MPI_GATHER(transition_matrix, chunk_size*num_states, MPI_REAL8, &
+!                  transition_matrix_3D(:, :, myid+1), chunk_size*num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+!	call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )				  
+!
+!! Print global_matrix to a file on the master process
+!	if (myid == 0) then
+!	  call write_global_matrix_to_file(transition_matrix_3D, "output_global_matrix.csv", pe_num)
+!	end if			  
+!	
+!	if (myid .eq. 0) deallocate(transition_matrix_3D)
 	
+! Finding istart_new by reflecting through ifinish_new
+	allocate(istart_new(num_states))
+	allocate(ifinish_new(num_states))
+    istart_new = 0d0
+	ifinish_new = 0d0
 	
-! Allocate global transition matrix
-	if (myid .eq. 0) then
-		allocate(transition_matrix_3D(num_states, chunk_size, pe_num))
-		transition_matrix_3D = 0
-	end if
-	
-! Gather local transition matrix from all processes to global transition matrix
-	call MPI_GATHER(transition_matrix, chunk_size*num_states, MPI_REAL8, &
-                  transition_matrix_3D(:, :, myid+1), chunk_size*num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
-	call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )				  
+	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+		if (i > num_states) exit
+		a = i - myid*chunk_size			
+		do j = num_states, 1, -1
+			if (j > i) then
+				if (transition_matrix(j, a) .gt. kij_min) then
+					ifinish_new(i) = j
+					exit
+				end if
+			else
+				if (j == i) ifinish_new(i) = i
+			end if
+		end do
+		
+		do j = 1, num_states
+			if (j < i) then
+				if (transition_matrix(j, a) .gt. kij_min*(equilibrium_constants_m3(i)/equilibrium_constants_m3(j))) then
+					istart_new(i) = j
+					exit
+				end if
+			else
+				if (j == i) istart_new(i) = i
+			end if
+		end do
+			
+	end do
 
-! Print global_matrix to a file on the master process
-	if (myid == 0) then
-	  call write_global_matrix_to_file(transition_matrix_3D, "output_global_matrix.csv", pe_num)
-	end if			  
-	
-	if (myid .eq. 0) deallocate(transition_matrix_3D)
-	
+!! Procs load for every processor	
+!	procs_load = 0
+!	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+!		if (i > num_states) exit
+!		procs_load = procs_load + (ifinish_new(i) - istart_new(i) + 1)
+!	end do
+!	write(*, *) myid+1, procs_load	
+
+! Reflect istart_new_rever through ifinish_new_rever		
+!	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+!		if (i > num_states)  exit	
+!		write(1000*myid+1, *) i, istart_new(i), ifinish_new(i) 
+!	end do
+
+!! printing Vcut
+!	open(newunit=hunit, file='Vcut.csv', status='replace')
+!	
+!	do i = 1, num_states
+!		do j = 1, num_states
+!			if (j > i) then
+!				write(hunit, '(E19.5,a1,1x)', advance='no') kij_min, ',' 
+!			else
+!				write(hunit, '(E19.5,a1,1x)', advance='no') kij_min*equilibrium_constants_m3(i)/equilibrium_constants_m3(j), ',' 
+!			end if
+!		end do
+!		write (hunit, *)
+!	end do
+!	close(hunit)
+!
+!! Printing matrix/Vcut
+!	open(newunit=wunit, file='matrix_over_Vcut.csv', status='replace')
+!	do i = 1, num_states
+!		do j = 1, num_states
+!			if (j > i) then
+!				write(wunit, '(E19.5,a1,1x)', advance='no') transition_matrix(j, i)/kij_min, ',' 
+!			else
+!				write(wunit, '(E19.5,a1,1x)', advance='no') &
+!				transition_matrix(j, i)/(kij_min*equilibrium_constants_m3(i)/equilibrium_constants_m3(j)), ',' 
+!			end if
+!		end do
+!		write (wunit, *)
+!	end do
+!	close(wunit)
+		
 ! Scaling of the matrices
-!	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
-	truncated_matrix = truncated_matrix * k0_m3_per_s * M_per_m3
+	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
+!	truncated_matrix = truncated_matrix * k0_m3_per_s * M_per_m3
 
 ! Compute sum of rows in the transition matrix
 	allocate(sum_rows(num_states))
@@ -773,6 +855,7 @@ PROGRAM RK_Solution
 
 	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
 	   a = i - myid*chunk_size
+	   if (i > num_states) exit
 	   do j = 1, num_states
 		sum_rows(i) = sum_rows(i) + transition_matrix(j, a)*(equilibrium_constants_m3(j)/equilibrium_constants_m3(i))
 	   end do
@@ -797,6 +880,7 @@ PROGRAM RK_Solution
 	
 	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
 		a = i - myid*chunk_size
+		if (i > num_states) exit
 		Second_term(i) = kdecs_per_s(i) + sum_rows(i)
 	end do
 	
@@ -898,18 +982,18 @@ PROGRAM RK_Solution
 	end if
 	
 	call cpu_time(start_time_master_eq)
-	
+		
 !  The main time-propogation loop
 	allocate(Cout(num_states))
 	do while (t<=t_final)
 			  call derivs(t, C, dCdt)
 			  
-			  if (iteration_counter == 1) then
-				  do i = 1, num_states
+!			  if (iteration_counter == 1) then
+!				  do i = 1, num_states
 !					 if (myid == 0) write(4000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12,1x,E19.12)')  myid+1, t, i, C(i), dCdt(i), k_rec
-				  end do 
-			  end if		  
-			  if (iteration_counter == 5) stop			  
+!				  end do 
+!			  end if		  
+!			  if (iteration_counter == 20) stop 		  
 			  
 ! Solve the differential equation using rk4 subroutine and update variables
 			  call rk4(C, dCdt, num_states, t, h, Cout, derivs)
@@ -1020,14 +1104,17 @@ PROGRAM RK_Solution
 		integer :: chunk_size_last
 
 		chunk_size_last = num_states - (pe_num-1)*chunk_size
-		
+		dCdt_myid = 0 
 ! Calculate the derivatives dC/dt
 ! Loop over final states, same as equation numbers:
 		Third_term = 0d0
-		
-		do i = 1, chunk_size
-			do j = 1, num_states
-				Third_term(i) = Third_term(i) + transition_matrix(j, i)*C(j)
+	
+		do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+	    a = i - myid*chunk_size
+		if (i > num_states) exit
+!		do i = 1, chunk_size
+			do j = istart_new(i), ifinish_new(i) ! 1, num_states
+				Third_term(a) = Third_term(a) + transition_matrix(j, a)*C(j)
 			end do
 		end do
 		
@@ -1039,6 +1126,7 @@ PROGRAM RK_Solution
 			if (myid .eq. pe_num-1 .and. i > chunk_size_last) exit
 			dCdt_myid(i) = First_term_myid(i) - Second_term_myid(i)*C_myid(i) + Third_term(i)
 !			write(myid*1000+1,'(I8,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12)') i, dCdt_myid(i), First_term_myid(i), Second_term_myid(i), C_myid(i), Third_term(i)			
+!			write(myid*1000+1,'(I8,1x,E20.12)') i, dCdt_myid(i)
 		end do
 		
 !		write(myid*1000+1,'(9(E20.12))') (dCdt_myid(j), j = 1, num_states)
@@ -1056,7 +1144,7 @@ PROGRAM RK_Solution
 				end do
 			 end do
 90 			end if 
-				
+		
 !		if (myid == 0 ) then 
 !			do counter = 1, num_states
 !				j = int(counter/chunk_size) + 1
@@ -1114,10 +1202,11 @@ PROGRAM RK_Solution
 		real*8, dimension(:), intent(in) :: Energies(:)
 		real*8, dimension(:), intent(in) :: Cov(:), Vdw(:), Inf(:)
 		real*8 :: dE_down, dE_up
-		real*8 :: ptran, matrix_tmp
+		real*8 :: ptran, matrix_tmp, dJ
 		real*8, allocatable, dimension(:, :) :: matrix
 		integer :: i, j, a, chunk_size_last
 	
+		dJ = 2.d0
 		allocate(matrix(num_states, chunk_size))
 		matrix = 0.d0
 	
@@ -1132,9 +1221,12 @@ PROGRAM RK_Solution
 			  ptran = Cov(i)*Cov(j) + Vdw(i)*Vdw(j)! + Inf(i)*Inf(j)
 			  
 			  if (j > i) then
-				matrix(j, a) = ptran * exp((Energies(j) - Energies(i)) / dE_down)
+				matrix_tmp = ptran * exp((Energies(j) - Energies(i)) / dE_down) * exp(-abs(J_rot(j)-J_rot(i))/dJ)
+				if (matrix_tmp > kij_min) matrix(j, a) = matrix_tmp
 			  else
-				matrix(j, a) = ptran * exp((Energies(i) - Energies(j)) / dE_down) * eq_concs(i) / eq_concs(j)
+				matrix_tmp = ptran * exp((Energies(i) - Energies(j)) / dE_down)&
+				* exp(-abs(J_rot(j)-J_rot(i))/dJ) * eq_concs(i)/eq_concs(j)
+				if (matrix_tmp > kij_min* eq_concs(i)/eq_concs(j)) matrix(j, a) = matrix_tmp
 !			 	dE_up = get_dE_up(dE_down, temp_k, Energies(j), Energies(i), equilibrium_constants_m3(j), equilibrium_constants_m3(i))				
 !				matrix(j, a) = ptran * exp((Energies(i) - Energies(j)) / dE_up)
 			  end if
