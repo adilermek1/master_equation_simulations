@@ -111,7 +111,7 @@ PROGRAM RK_Solution
 	C_O_per_m3 = 6.44e+18
 	C_O2_per_m3 = 6.44e+20
 	M_per_m3 = 10000*6.44e+24
-	C_initial_O3_per_m3 = 0 !9999 ! 82510272735.4575
+	C_initial_O3_per_m3 = 0 !9999 !82510272735.4575
 	
 ! Pressure related parameters
 	ref_pressure_per_m3 = 6.44e+24
@@ -619,7 +619,7 @@ PROGRAM RK_Solution
 !	close(gunit)
 	
 	
-	if (myid == 0) then
+	if (myid == 1) then
 		if (print_transition_matrix .eqv. .True.) then
 			output2 = 'transition_matrix.csv'
 			open(newunit=kunit, file=output2, status='replace')
@@ -628,8 +628,8 @@ PROGRAM RK_Solution
 			end do
 				write (kunit, *)
 			
-			do i = 1, size(transition_matrix, 1)
-				do j = 1, size(transition_matrix, 2)
+			do i = 1, size(transition_matrix, 2)
+				do j = 1, size(transition_matrix, 1)
 				 if (j == 1) then
 					write(kunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', transition_matrix(j, i), ','
 				 else 
@@ -641,6 +641,7 @@ PROGRAM RK_Solution
 			close(kunit)
 		end if
 	end if
+
 
 !! Counting the elements which are greater than cuttoff value in the transition matrix
 !	output7 = 'cuttoff_count_numbers.out'
@@ -766,9 +767,12 @@ PROGRAM RK_Solution
     istart_new = 0d0
 	ifinish_new = 0d0
 	
-	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+!	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+!		a = i - myid*chunk_size			
+		do i = myid+1, num_states, pe_num
+		a = (i - (myid+1))/pe_num + 1
+
 		if (i > num_states) exit
-		a = i - myid*chunk_size			
 		do j = num_states, 1, -1
 			if (j > i) then
 				if (transition_matrix(j, a) .gt. kij_min) then
@@ -792,14 +796,14 @@ PROGRAM RK_Solution
 		end do
 			
 	end do
-
-! Procs load for every processor	
-	procs_load = 0
-	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-		if (i > num_states) exit
-		procs_load = procs_load + (ifinish_new(i) - istart_new(i) + 1)
-	end do
-	write(*, *) myid+1, procs_load	
+	
+! Procs load for every processor
+		procs_load = 0
+		do i = myid+1, num_states, pe_num
+			if (i > num_states) exit
+			procs_load = procs_load + (ifinish_new(i) - istart_new(i) + 1)
+		end do
+		write(*, *) myid+1, procs_load
 
 ! Reflect istart_new_rever through ifinish_new_rever		
 !	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
@@ -853,8 +857,10 @@ PROGRAM RK_Solution
 !		end do
 !	end do
 
-	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-	   a = i - myid*chunk_size
+!	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+!	   a = i - myid*chunk_size
+	do i = myid+1, num_states, pe_num
+	   a = (i - (myid+1))/pe_num + 1
 	   if (i > num_states) exit
 	   do j = 1, num_states
 		sum_rows(i) = sum_rows(i) + transition_matrix(j, a)*(equilibrium_constants_m3(j)/equilibrium_constants_m3(i))
@@ -878,22 +884,31 @@ PROGRAM RK_Solution
 !		Second_term_truncated(i) = kdecs_per_s(i) + sum_rows_truncated(i)
 	end do
 	
-	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-		a = i - myid*chunk_size
+!	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+!		a = i - myid*chunk_size
+	Second_term = 0
+	do i = myid+1, num_states, pe_num
+	   a = (i - (myid+1))/pe_num + 1
 		if (i > num_states) exit
 		Second_term(i) = kdecs_per_s(i) + sum_rows(i)
 	end do
 	
 	allocate(First_term_myid(chunk_size))
-	do i = 1, chunk_size
-		First_term_myid(i) = First_term(myid*chunk_size + i)
+	do i = myid+1, num_states, pe_num !1, chunk_size
+		a = (i - (myid+1))/pe_num + 1
+		if (i > num_states) exit		 
+		First_term_myid(a) = First_term(i)
+!	write(100*myid+1, '(I8, 1x, I8, 1x, E20.12)') i, a, First_term_myid(a)		
 	end do	
-	
+ 	
 	allocate(Second_term_myid(chunk_size))
-	do i = 1, chunk_size
-		Second_term_myid(i) = Second_term(myid*chunk_size + i)
+	do i = myid+1, num_states, pe_num !1, chunk_size
+		a = (i - (myid+1))/pe_num + 1
+		if (i > num_states) exit	
+		Second_term_myid(a) = Second_term(i)
+!	write(100*myid+1, '(I8, 1x, I8, 1x, E20.12)') i, a, Second_term_myid(a)		
 	end do
-		
+ 		
 ! Setting up and printing the initial conditions for concentrations at t=0
 	allocate(C(num_states))
 	allocate(dCdt(num_states))
@@ -1068,8 +1083,10 @@ PROGRAM RK_Solution
 	  ! Loop over each processor
 	  do k = 1, num_procs
 		! Loop over each row of the matrix and write to the file
-		do i = (k-1)*chunk_size+1, (k-1)*chunk_size+chunk_size
-		a = i - (k-1)*chunk_size
+!		do i = (k-1)*chunk_size+1, (k-1)*chunk_size+chunk_size
+!		a = i - (k-1)*chunk_size
+		do i = k, num_states, pe_num
+		a = (i - k)/pe_num + 1
 		
 		if (myid .eq. pe_num-1) then
 			chunk_size_last = num_states - (pe_num-1)*chunk_size
@@ -1109,8 +1126,10 @@ PROGRAM RK_Solution
 ! Loop over final states, same as equation numbers:
 		Third_term = 0d0
 	
-		do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-	    a = i - myid*chunk_size
+!		do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+!	    a = i - myid*chunk_size
+		do i = myid+1, num_states, pe_num
+		a = (i - (myid+1))/pe_num + 1
 		if (i > num_states) exit
 !		do i = 1, chunk_size
 			do j = istart_new(i), ifinish_new(i) ! 1, num_states
@@ -1118,13 +1137,15 @@ PROGRAM RK_Solution
 			end do
 		end do
 		
-		do i = 1, chunk_size
-			C_myid(i) = C(myid*chunk_size + i)
+		do i = myid+1, num_states, pe_num !1, chunk_size
+			a = (i - (myid+1))/pe_num + 1
+			if (i > num_states) exit			
+			C_myid(a) = C(i)
 		end do
 
-! Unequal load on processors
+! Equal load on processors		
 		do a = 1, chunk_size
-			i = a + myid*chunk_size
+			i = (myid+1) + (a-1)*pe_num
 			dCdt_myid(a) = First_term_myid(a) - Second_term_myid(a)*C_myid(a) + Third_term(a)
 !			write(myid*1000+1,'(I8,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12,1x,E20.12)') i, dCdt_myid(i), First_term_myid(i), Second_term_myid(i), C_myid(i), Third_term(i)			
 !			write(myid*1000+1,'(I8,1x,I8,1x,E20.12)') i, a, dCdt_myid(a)
@@ -1136,16 +1157,16 @@ PROGRAM RK_Solution
 		call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
 								 
 		if (myid == 0 ) then 
-			do j = 1, pe_num
-				do i = 1, chunk_size
-					counter = (j-1)*chunk_size + i
+			do i = 1, chunk_size
+				do j = 1, pe_num
+					counter = (i-1)*pe_num + j
 					if (counter .gt. num_states) goto 90
 					dCdt(counter) = dCdt_myid2(i, j)
 !					write(1000, '(I8, 1x, E20.12)') counter, dCdt(counter)
 				end do
 			 end do
 90 		end if 
-
+ 
 !		if (myid == 0 ) then 
 !			do counter = 1, num_states
 !				j = int(counter/chunk_size) + 1
@@ -1211,8 +1232,10 @@ PROGRAM RK_Solution
 		allocate(matrix(num_states, chunk_size))
 		matrix = 0.d0
 	
-		do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-		a = i - myid*chunk_size
+!		do i = myid*chunk_size+1, myid*chunk_size+chunk_size
+!		a = i - myid*chunk_size
+		do i = myid+1, num_states, pe_num
+		a = (i - (myid+1))/pe_num + 1
 		
 		if (i > num_states) exit
 				
