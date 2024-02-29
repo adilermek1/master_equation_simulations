@@ -110,18 +110,18 @@ PROGRAM RK_Solution
 ! Gas Mixture Parameters for reagents and bath gas	
 	C_O_per_m3 = 6.44e+18
 	C_O2_per_m3 = 6.44e+20
-	M_per_m3 = 10000*6.44e+24
-	C_initial_O3_per_m3 = 0 !9999 !82510272735.4575
+	M_per_m3 = 1*6.44e+24
+	C_initial_O3_per_m3 = 0 ! 9999 !82510272735.4575
 	
 ! Pressure related parameters
 	ref_pressure_per_m3 = 6.44e+24
 	pressure_ratio = M_per_m3 / ref_pressure_per_m3
 	
 	temp_k = 298
-	sigma0_m2 = 2300 * m_per_a0**2
+	sigma0_m2 = 1200 * m_per_a0**2
 
 ! Parameters for energy transfer model	
-	dE_down = -43.13
+	dE_down = -240.5556
 	!dE(1) = -200.13 * j_per_cm
 	!dE(2) = get_dE_up(dE(1), temp_k)
 	
@@ -133,7 +133,7 @@ PROGRAM RK_Solution
 	lower_energy_lim = -3000
 	upper_energy_lim = 300
 	upper_gamma_lim = 200
-	lower_gamma_lim = 0.d0 ! 10**(-2)
+	lower_gamma_lim = 1.d-1 ! 10**(-2)
 
 ! Ozone isotope Labels
 	o3_molecule = "666"
@@ -146,15 +146,15 @@ PROGRAM RK_Solution
 ! Initial and final time and time step
 	t0 = 0.0d0
 ! 0.01*1000e-9 / pressure_ratio = 1e-12 in case of 10000std of M_per_m3
-	t_final = 0.07e-12 !135e-14 ! 1.35*0.01*1000e-9 / pressure_ratio
-	h = 100e-20 !0.001*1e-13! 1*1e-9 / (pressure_ratio)
+	t_final = 0.7e-12 !135e-14 ! 1.35*0.01*1000e-9 / pressure_ratio
+	h = 4*100e-20 !0.001*1e-13! 1*1e-9 / (pressure_ratio)
 	band_width = 10
 	print_freq = 1
 	print_detail = .False.
 	truncation = .False.
 	K_dependent = .False.
 	print_transition_matrix = .False.
-	kij_min = 0.d-4 ! 0.1
+	kij_min = 1.d-3 ! 0.1
 
 ! Specify the directory and file name  
 	filename = "state_properties.fwc"
@@ -418,7 +418,8 @@ PROGRAM RK_Solution
 					Energies(num_counter) < max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 						+ upper_energy_lim .and. Gammas(num_counter) <= upper_gamma_lim) then					
 ! Neglect Gamma if state is below threshold, otherwise call it a resonance					
-						if (Energies(num_counter) < threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1)) then
+						if (Energies(num_counter) < threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1) .or. &
+						Gammas(num_counter) < lower_gamma_lim) then
 							Gammas(num_counter) = 0
 						else 
 							Resonance(num_counter) = 1
@@ -1008,7 +1009,7 @@ PROGRAM RK_Solution
 !					 if (myid == 0) write(4000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12,1x,E19.12)')  myid+1, t, i, C(i), dCdt(i), k_rec
 !				  end do 
 !			  end if		  
-			  if (iteration_counter == 20) stop 		  
+			  if (iteration_counter == 100) stop 		  
 			  
 ! Solve the differential equation using rk4 subroutine and update variables
 			  call rk4(C, dCdt, num_states, t, h, Cout, derivs)
@@ -1142,8 +1143,7 @@ PROGRAM RK_Solution
 			if (i > num_states) exit			
 			C_myid(a) = C(i)
 		end do
-
-! Equal load on processors		
+		
 		do a = 1, chunk_size
 			i = (myid+1) + (a-1)*pe_num
 			dCdt_myid(a) = First_term_myid(a) - Second_term_myid(a)*C_myid(a) + Third_term(a)
@@ -1228,7 +1228,7 @@ PROGRAM RK_Solution
 		real*8, allocatable, dimension(:, :) :: matrix
 		integer :: i, j, a, chunk_size_last
 	
-		dJ = 2.d0
+		dJ = 10.7894d0
 		allocate(matrix(num_states, chunk_size))
 		matrix = 0.d0
 	
