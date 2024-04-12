@@ -15,7 +15,7 @@ PROGRAM RK_Solution
 	eq_conc
 	character(100) :: output, output1, output2, output3, output4, output5, output6, output7, output8, output9, output10, output11
 	integer :: iunit, junit, kunit, nunit, munit, aunit, bunit, cunit, dunit, eunit, funit, j, unit, n, last_bound, k, gunit, hunit, &
-	wunit, zunit
+	wunit, zunit, lunit
 	integer :: unit_K0, unit_K1, unit_K2, unit_K3, unit_K4, unit_K5, unit_K6, unit_K7, &
 	unit_K8, unit_K9, unit_K10, unit_K11, unit_K12, unit_K13, unit_K14, unit_K15, unit_K16, &
 	unit_K17, unit_K18, unit_K19, unit_K20, a, counter
@@ -28,24 +28,26 @@ PROGRAM RK_Solution
 	filepath_K16, filepath_K17, filepath_K18, filepath_K19, filepath_K20
 	
 	integer :: num_states, i, ios, num_counter, num_limit, ios_K0, ios_K1, ios_K2, ios_K3, ios_K4, ios_K5, ios_K6, ios_K7, ios_K8, &
-	ios_K9, ios_K10, ios_K11, ios_K12, ios_K13, ios_K14, ios_K15, ios_K16, ios_K17, ios_K18, ios_K19, ios_K20, procs_load
+	ios_K9, ios_K10, ios_K11, ios_K12, ios_K13, ios_K14, ios_K15, ios_K16, ios_K17, ios_K18, ios_K19, ios_K20, procs_load, iostat_procs_load
 	
-	real*8, dimension(:), allocatable :: Energies, Gammas, Covalent_All, Vdw_All, Infinity_All, equilibrium_constants_m3, eq_concs
-	real*8, dimension(:, :), allocatable :: truncated_matrix
+	real*8, dimension(:), allocatable :: Energies, Gammas, Covalent_All, Vdw_All, &
+	Infinity_All, equilibrium_constants_m3, eq_concs
+	real*8, dimension(:, :), allocatable :: truncated_matrix, weights_2D, krec3_Lindeman_collected, krec3_Lindeman_low_p_lim_collected
 	real*8, dimension(:, :), allocatable :: transition_matrix, Second_term_2d, symmetric_matrix
 	real*8, dimension(:, :, :), allocatable :: transition_matrix_3D
-	integer, dimension(:, :), allocatable :: state_pointer
+	integer, dimension(:, :), allocatable :: state_pointer, C_JK
 	real*8, dimension(:), allocatable :: First_term, Second_term, Second_term_truncated, sum_rows, &
-	threshold_Energies_K, sum_rows_truncated, Second_term_main, First_term_myid, Second_term_myid
+	threshold_Energies_K, sum_rows_truncated, Second_term_main, First_term_myid,&
+	Second_term_myid, weights, kbstab, kstab, weights_Lindeman, kbstab_low
 	real*8 :: h_j_per_s, hbar_js, c_cm_per_s, C_O_per_m3, C_O2_per_m3, temp_k
-	real*8 :: part_funcs_o2_per_m3
+	real*8 :: part_funcs_o2_per_m3, krec3_Lindeman, krec3_Lindeman_low_p_lim_final
 	character(len=3) :: o3_molecule
     character(len=2) :: o2_molecule, o_atom
 	integer :: J_rot_start
 	real*8 :: m_per_a0, j_per_k, j_per_cm, cm_per_k, kt_energy_cm, M_per_m3, ref_pressure_per_m3, pressure_ratio
-	real*8 :: k0_m3_per_s, sigma0_m2, pi
+	real*8 :: k0_m3_per_s, sigma0_m2, pi, localization_prob_cov, localization_prob_vdw, krec3_high_p_lim, krec3_low_p_lim
 	real*8, dimension(2) :: dE
-	real*8 :: C_init, C_tot, dCdt_tot, K_eqs_tot, threshold_E
+	real*8 :: C_init, C_tot, dCdt_tot, K_eqs_tot, threshold_E, krec3
 	real*8 :: Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
 	real*8 :: k_rec, lower_energy_lim, upper_energy_lim, upper_gamma_lim, lower_gamma_lim
 	integer :: threshold_j, Js, Ks, vib_sym_well, iteration_counter, print_freq, K_initial, K_final, band_width, K_exact
@@ -60,7 +62,7 @@ PROGRAM RK_Solution
 	integer :: Ks_indep, cutoff_count_max, pe_num, ierr_a, myid, chunk_size, K_step, K_final_last, vib_sym_well_start, &
 	vib_sym_well_last, J_initial, J_final, w
 	
-	logical :: print_detail, truncation, K_dependent, print_transition_matrix
+	logical :: print_detail, truncation, K_dependent, print_transition_matrix, up_to_twenty_K_cells, writing_processors_load
 	integer, dimension(:, :, :), allocatable :: num_states_J_K_sym, &
 	num_counter_J_K_sym, unit_J_K_sym, ios_J_K_sym
 	real*8, dimension(:, :, :), allocatable :: threshold_Energies_J_K_sym	
@@ -92,10 +94,6 @@ PROGRAM RK_Solution
 !	end if
 	
 ! Conversion factors	
-	!m_per_a0 = get_m_per_a0();
-	!j_per_k = get_j_per_k()
-	!j_per_k = get_j_per_k()
-	!j_per_cm = get_j_per_cm()
 	m_per_a0 = 5.2917721092e-11
 	j_per_k = 1.3806488e-23
 	j_per_cm = 1.986445682933742e-23
@@ -118,7 +116,7 @@ PROGRAM RK_Solution
 	pressure_ratio = M_per_m3 / ref_pressure_per_m3
 	
 	temp_k = 298
-	sigma0_m2 = 1200 * m_per_a0**2
+	sigma0_m2 = 70 * m_per_a0**2
 
 ! Parameters for energy transfer model	
 	dE_down = -240.5556
@@ -132,9 +130,10 @@ PROGRAM RK_Solution
 ! Energy Spectrum Parameters in wave numbers	
 	lower_energy_lim = -3000
 	upper_energy_lim = 300
-	upper_gamma_lim = 200
-	lower_gamma_lim = 1.d-1 ! 10**(-2)
-
+	upper_gamma_lim = 200.d0
+	lower_gamma_lim = 0.d0 ! 10**(-2)
+	localization_prob_cov = 0 !3.d-2
+	localization_prob_vdw = 0 !3.d-1
 ! Ozone isotope Labels
 	o3_molecule = "666"
 	o2_molecule = "66"
@@ -146,30 +145,51 @@ PROGRAM RK_Solution
 ! Initial and final time and time step
 	t0 = 0.0d0
 ! 0.01*1000e-9 / pressure_ratio = 1e-12 in case of 10000std of M_per_m3
-	t_final = 0.7e-12 !135e-14 ! 1.35*0.01*1000e-9 / pressure_ratio
-	h = 4*100e-20 !0.001*1e-13! 1*1e-9 / (pressure_ratio)
+	if ((M_per_m3 == 1*6.44e+24) .or. (M_per_m3 == 10*6.44e+24) .or. (M_per_m3 == 100*6.44e+24)) then
+		t_final = 15e-12 !135e-14 ! 1.35*0.01*1000e-9 / pressure_ratio
+		h = 9e-16 !4*100e-20 !0.001*1e-13! 1*1e-9 / (pressure_ratio)
+	else
+		if (M_per_m3 == 1000*6.44e+24) then
+			t_final = 5e-12
+			h = 5e-16
+		else
+			if (M_per_m3 == 10000*6.44e+24) then
+				t_final = 1e-12
+				h = 7e-17
+			else
+				if (M_per_m3 == 100000*6.44e+24) then
+					t_final = 1e-13
+					h = 8e-18
+				endif
+			endif
+		endif
+	endif
+			
 	band_width = 10
 	print_freq = 1
+	
+	K_dependent = .False.
 	print_detail = .False.
 	truncation = .False.
-	K_dependent = .False.
 	print_transition_matrix = .False.
+	up_to_twenty_K_cells = .False.
+	writing_processors_load = .False.
+	
 	kij_min = 1.d-3 ! 0.1
 
 ! Specify the directory and file name  
 	filename = "state_properties.fwc"
 
 	num_states = 0	
-	J_initial = 16
-	J_final = 26
-	K_exact = 5
+	J_initial = 24
+	J_final = 24
+	K_exact = 2
+	K_initial = 2
 	
-	K_initial = 0
 	K_step = 1
-	
 	K_final_last = 20
 	vib_sym_well_start = 0
-	vib_sym_well_last = 1
+	vib_sym_well_last = 0
 	
 	allocate(num_states_J_K_sym(J_final+1, K_final_last+1, vib_sym_well_last+1))
 	num_states_J_K_sym = 0
@@ -182,9 +202,17 @@ PROGRAM RK_Solution
 			write(Js_string, '(I0)') Js
 			
 			if (Js < 20) then
-				K_final = K_exact !Js
+				if (up_to_twenty_K_cells .eq. .True.) then
+					K_final = Js
+				else
+					K_final = K_exact
+				end if
 			else
-				K_final = K_exact !K_final_last
+				if (up_to_twenty_K_cells .eq. .True.) then
+					K_final = K_final_last
+				else
+					K_final = K_exact
+				end if
 			end if
 			
 			do Ks = K_initial, K_final, K_step
@@ -211,11 +239,14 @@ PROGRAM RK_Solution
 							do
 								read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
 								if (ios /= 0) exit
+								
 								if (Energy_tmp > max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 								+ lower_energy_lim .and. &
 									Energy_tmp < max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 									+ upper_energy_lim &
-									.and. Total_Gamma_tmp <= upper_gamma_lim) then
+									.and. Total_Gamma_tmp <= upper_gamma_lim .and. &
+									Covalent_All_tmp > localization_prob_cov .and. Vdw_All_tmp > localization_prob_vdw) then
+									
 									num_states = num_states + 1
 									num_states_J_K_sym(Js+1, Ks+1, vib_sym_well+1) = num_states_J_K_sym(Js+1, Ks+1, vib_sym_well+1) + 1
 								end if
@@ -244,11 +275,14 @@ PROGRAM RK_Solution
 							do
 								read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
 								if (ios /= 0) exit
+								
 								if (Energy_tmp > max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 								+ lower_energy_lim .and. &
 									Energy_tmp < max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 									+ upper_energy_lim &
-									.and. Total_Gamma_tmp <= upper_gamma_lim) then
+									.and. Total_Gamma_tmp <= upper_gamma_lim .and. &
+									Covalent_All_tmp > localization_prob_cov .and. Vdw_All_tmp > localization_prob_vdw) then
+									
 									num_states = num_states + 1
 									num_states_J_K_sym(Js+1, Ks+1, vib_sym_well+1) = num_states_J_K_sym(Js+1, Ks+1, vib_sym_well+1) + 1									
 								end if
@@ -280,11 +314,14 @@ PROGRAM RK_Solution
 							do
 								read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
 								if (ios /= 0) exit
+								
 								if (Energy_tmp > max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 								+ lower_energy_lim .and. &
 									Energy_tmp < max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 									+ upper_energy_lim &
-									.and. Total_Gamma_tmp <= upper_gamma_lim) then
+									.and. Total_Gamma_tmp <= upper_gamma_lim .and. &
+									Covalent_All_tmp > localization_prob_cov .and. Vdw_All_tmp > localization_prob_vdw) then
+									
 									num_states = num_states + 1
 									num_states_J_K_sym(Js+1, Ks+1, vib_sym_well+1) = num_states_J_K_sym(Js+1, Ks+1, vib_sym_well+1) + 1									
 								end if
@@ -313,11 +350,14 @@ PROGRAM RK_Solution
 							do
 								read(unit, *, iostat=ios) Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
 								if (ios /= 0) exit
+								
 								if (Energy_tmp > max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 								+ lower_energy_lim .and. &
 									Energy_tmp < max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 									+ upper_energy_lim &
-									.and. Total_Gamma_tmp <= upper_gamma_lim) then
+									.and. Total_Gamma_tmp <= upper_gamma_lim .and. &
+									Covalent_All_tmp > localization_prob_cov .and. Vdw_All_tmp > localization_prob_vdw) then
+									
 									num_states = num_states + 1
 									num_states_J_K_sym(Js+1, Ks+1, vib_sym_well+1) = num_states_J_K_sym(Js+1, Ks+1, vib_sym_well+1) + 1									
 								end if
@@ -376,12 +416,20 @@ PROGRAM RK_Solution
 	do vib_sym_well = vib_sym_well_start, vib_sym_well_last
 	
 		do Js = J_initial, J_final
-		
+					
 			if (Js < 20) then
-				K_final = K_exact !Js
+				if (up_to_twenty_K_cells .eq. .True.) then
+					K_final = Js
+				else
+					K_final = K_exact
+				end if
 			else
-				K_final = K_exact !K_final_last
-			end if
+				if (up_to_twenty_K_cells .eq. .True.) then
+					K_final = K_final_last
+				else
+					K_final = K_exact
+				end if
+			end if			
 			
 			do Ks = K_initial, K_final, K_step
 				open(newunit=unit_J_K_sym(Js+1, Ks+1, vib_sym_well+1), file=filepath_JKsym(Js+1, Ks+1, vib_sym_well+1), &
@@ -395,11 +443,19 @@ PROGRAM RK_Solution
 	do vib_sym_well = vib_sym_well_start, vib_sym_well_last
 	
 		do Js = J_initial, J_final
-		
+					
 			if (Js < 20) then
-				K_final = K_exact !Js
+				if (up_to_twenty_K_cells .eq. .True.) then
+					K_final = Js
+				else
+					K_final = K_exact
+				end if
 			else
-				K_final = K_exact !K_final_last
+				if (up_to_twenty_K_cells .eq. .True.) then
+					K_final = K_final_last
+				else
+					K_final = K_exact
+				end if
 			end if
 			
 ! Read and store the filtered data
@@ -413,10 +469,13 @@ PROGRAM RK_Solution
 					read(unit_J_K_sym(Js+1, Ks+1, vib_sym_well+1), *, iostat=ios_J_K_sym(Js+1, Ks+1, vib_sym_well+1)) &
 					Energies(num_counter), Gammas(num_counter), &
 					Covalent_All(num_counter), Vdw_All(num_counter), Infinity_All(num_counter)
+					
 					if (Energies(num_counter) > max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
 					+ lower_energy_lim .and. &
 					Energies(num_counter) < max(threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1), barrier_energies_matrix(Ks+1, Js+1)) &
-						+ upper_energy_lim .and. Gammas(num_counter) <= upper_gamma_lim) then					
+						+ upper_energy_lim .and. Gammas(num_counter) <= upper_gamma_lim .and. &
+						Covalent_All(num_counter) > localization_prob_cov .and. Vdw_All(num_counter) > localization_prob_vdw) then
+						
 ! Neglect Gamma if state is below threshold, otherwise call it a resonance					
 						if (Energies(num_counter) < threshold_Energies_J_K_sym(Js+1, Ks+1, vib_sym_well+1) .or. &
 						Gammas(num_counter) < lower_gamma_lim) then
@@ -487,11 +546,21 @@ PROGRAM RK_Solution
 	
 10	do vib_sym_well = vib_sym_well_start, vib_sym_well_last
 		do Js = J_initial, J_final
+
 			if (Js < 20) then
-				K_final = K_exact !Js
+				if (up_to_twenty_K_cells .eq. .True.) then
+					K_final = Js
+				else
+					K_final = K_exact
+				end if
 			else
-				K_final = K_exact !K_final_last
-			end if	
+				if (up_to_twenty_K_cells .eq. .True.) then
+					K_final = K_final_last
+				else
+					K_final = K_exact
+				end if
+			end if			
+
 			do Ks =  K_initial, K_final, K_step
 				close(unit_J_K_sym(Js+1, Ks+1, vib_sym_well+1))
 			end do
@@ -602,9 +671,6 @@ PROGRAM RK_Solution
 	allocate(transition_matrix(num_states, chunk_size))
 	transition_matrix = calculate_transition_matrix_unitless(Energies, Covalent_All, Vdw_All, Infinity_All, dE_down)
 
-! Scaling of the matrices
-!	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
-
 !	output11 = 'distribution_of_concentrations_over_kij_kji.txt'
 !	open(newunit=gunit, file=output11, status='replace')
 !	do i = 1, num_states
@@ -643,103 +709,6 @@ PROGRAM RK_Solution
 		end if
 	end if
 
-
-!! Counting the elements which are greater than cuttoff value in the transition matrix
-!	output7 = 'cuttoff_count_numbers.out'
-!	open(newunit=cunit, file=output7, status='replace')
-!	output8 = 'truncated_matrix.csv'
-!	open(newunit=dunit, file=output8, status='replace')
-!	output9 = 'state_pointer.csv'
-!	open(newunit=eunit, file=output9, status='replace')
-	
-!	cutoff_count_max = 0
-!	
-!	allocate(istart(num_states))
-!	allocate(ifinish(num_states))
-!	allocate(cutoff_count(num_states))
-!	allocate(state_pointer(num_states, num_states))
-!	allocate(truncated_matrix(num_states, num_states))
-!	ifinish = num_states
-!	cutoff_count = 0
-!	state_pointer = 0
-!	truncated_matrix = 0
-	
-!	do i = 1, num_states
-!!	  istart(i) = 0
-!		do j = 1, num_states
-!			 if (transition_matrix(j, i) .gt. kij_min) then 
-!			 cutoff_count(i) = cutoff_count(i) + 1
-!!			 truncated_matrix(cutoff_count(i), i) = transition_matrix(j, i)
-!			 truncated_matrix(j, i) = transition_matrix(j, i)
-!			 truncated_matrix(i, j) = transition_matrix(i, j)
-!			 state_pointer(cutoff_count(i), i) = j		 
-!			 ifinish(i) = j	
-!!			 if (istart(i) .eq. 0) istart(i) = j			 
-!			 end if
-!		end do
-				
-!		if (cutoff_count(i) .gt. cutoff_count_max) cutoff_count_max = cutoff_count(i)
-!	end do
-
-!! Finding istart indexes	
-!	do i = 1, num_states
-!		istart(i) = 0
-!		do j = 1, num_states
-!			if (truncated_matrix(j,i) /= 0) then
-!				if (istart(i) .eq. 0) istart(i) = j
-!			end if
-!		end do
-!		istart(1) = 1
-!		if (myid == 0) write(cunit, *) i, cutoff_count(i), istart(i), ifinish(i), ifinish(i) - istart(i) + 1, &
-!		ifinish(i) - istart(i) + 1 - cutoff_count(i)
-!	end do
-!	if (myid == 0) write(cunit, *) cutoff_count_max
-!	close(cunit)
-
-!! Print truncation matrix
-!	if (myid == 0) then
-!	if (print_transition_matrix .eqv. .True.) then	
-!		do j = 1, num_states !cutoff_count_max
-!			write(dunit, '(1x,I8,a1)', advance='no') j, ','
-!		end do
-!			write (dunit, *)
-!		
-!		do i = 1, size(truncated_matrix, 1)
-!			do j = 1, num_states !cutoff_count_max
-!			 if (j == 1) then
-!				write(dunit, '(I8,a1,1x,E19.12,a1,1x)', advance='no') i, ',', truncated_matrix(j, i), ','
-!			 else 
-!				write(dunit, '(E19.12,a1,1x)', advance='no') truncated_matrix(j, i), ',' 
-!			 end if
-!			end do
-!				write (dunit, *)
-!		end do
-!		close(dunit)
-!	end if
-!end if
-
-!! Print state_pointer matrix
-!	if (myid == 0) then
-!		if (print_transition_matrix .eqv. .True.) then	
-!			do j = 1, cutoff_count_max
-!				write(eunit, '(1x,I8,a1)', advance='no') j, ','
-!			end do
-!				write (eunit, *)
-!			
-!			do i = 1, size(state_pointer, 1)
-!				do j = 1, cutoff_count_max
-!				 if (j == 1) then
-!					write(eunit, '(I8,a1,1x,I8,a1,1x)', advance='no') i, ',', state_pointer(j, i), ','
-!				 else 
-!					write(eunit, '(I8,a1,1x)', advance='no') state_pointer(j, i), ',' 
-!				 end if
-!				end do
-!					write (eunit, *)
-!			end do
-!			close(eunit)
-!		end if
-!	end if
-			
 	call cpu_time(end_time_matrix)
 	if (myid == 0) write(*, *) "Time for calculating and writing matricies (transition, truncation and state pointer):", &
 	end_time_matrix-start_time_matrix, "seconds"
@@ -770,9 +739,8 @@ PROGRAM RK_Solution
 	
 !	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
 !		a = i - myid*chunk_size			
-		do i = myid+1, num_states, pe_num
+	do i = myid+1, num_states, pe_num
 		a = (i - (myid+1))/pe_num + 1
-
 		if (i > num_states) exit
 		do j = num_states, 1, -1
 			if (j > i) then
@@ -794,8 +762,7 @@ PROGRAM RK_Solution
 			else
 				if (j == i) istart_new(i) = i
 			end if
-		end do
-			
+		end do		
 	end do
 	
 ! Procs load for every processor
@@ -804,62 +771,109 @@ PROGRAM RK_Solution
 			if (i > num_states) exit
 			procs_load = procs_load + (ifinish_new(i) - istart_new(i) + 1)
 		end do
-		write(*, *) myid+1, procs_load
-
-! Reflect istart_new_rever through ifinish_new_rever		
-!	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-!		if (i > num_states)  exit	
-!		write(1000*myid+1, *) i, istart_new(i), ifinish_new(i) 
-!	end do
-
-!! printing Vcut
-!	open(newunit=hunit, file='Vcut.csv', status='replace')
-!	
-!	do i = 1, num_states
-!		do j = 1, num_states
-!			if (j > i) then
-!				write(hunit, '(E19.5,a1,1x)', advance='no') kij_min, ',' 
-!			else
-!				write(hunit, '(E19.5,a1,1x)', advance='no') kij_min*equilibrium_constants_m3(i)/equilibrium_constants_m3(j), ',' 
-!			end if
-!		end do
-!		write (hunit, *)
-!	end do
-!	close(hunit)
-!
-!! Printing matrix/Vcut
-!	open(newunit=wunit, file='matrix_over_Vcut.csv', status='replace')
-!	do i = 1, num_states
-!		do j = 1, num_states
-!			if (j > i) then
-!				write(wunit, '(E19.5,a1,1x)', advance='no') transition_matrix(j, i)/kij_min, ',' 
-!			else
-!				write(wunit, '(E19.5,a1,1x)', advance='no') &
-!				transition_matrix(j, i)/(kij_min*equilibrium_constants_m3(i)/equilibrium_constants_m3(j)), ',' 
-!			end if
-!		end do
-!		write (wunit, *)
-!	end do
-!	close(wunit)
+		if (writing_processors_load .eq. .True.) then
+			write(*, *) myid+1, procs_load
+		end if
 		
+! Calculating krec from Lindeman mechanism
+! Weights are calculated by each processor at this point
+			allocate(weights(num_states))
+			allocate(kstab(num_states))
+			weights = 0
+			kstab = 0
+			do j = myid+1, num_states, pe_num
+				a = (j - (myid+1))/pe_num + 1
+				if (j > num_states) exit
+				if (Resonance(j) == 1) then
+					do i = 1, num_states
+						if (Resonance(i) == 0) then
+							kstab(j) = kstab(j) + transition_matrix(i, a)*(equilibrium_constants_m3(i)/equilibrium_constants_m3(j))
+						end if
+					end do
+				weights(j) = kdecs_per_s(j) / (kdecs_per_s(j) + M_per_m3 * k0_m3_per_s * kstab(j))
+				end if
+			end do
+
+				
+			allocate(weights_2D(num_states, pe_num))
+			call MPI_GATHER(weights, num_states, MPI_REAL8, weights_2D, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)			
+			call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
+			
+			allocate(weights_Lindeman(num_states))			
+			if (myid == 0 ) then
+				do i = 1, num_states
+					do j = 1, pe_num
+						if (weights_2D(i,j)==0) cycle
+						weights_Lindeman(i) = weights_2D(i, j)
+!							write(1000, '(I8, 1x, E20.12)') counter, dCdt(counter)
+					end do
+				 end do
+90		 	end if 
+			call MPI_BCAST(weights_Lindeman, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+			
+!			if (myid .eq. 1) then
+!				do j = 1, num_states
+!					print *, j , weights_Lindeman(j)
+!				end do
+!			endif
+									
+			allocate(kbstab(num_states))
+			allocate(kbstab_low(num_states))
+			krec3 = 0
+			kbstab = 0
+			do i = myid+1, num_states, pe_num
+				a = (i - (myid+1))/pe_num + 1
+				if (i > num_states) exit						
+				if (Resonance(i) == 0) then
+					do j = 1, num_states
+						if (Resonance(j) == 1) then
+							kbstab(i) = kbstab(i) + k0_m3_per_s* transition_matrix(j, a)&
+							* weights_Lindeman(j) * equilibrium_constants_m3(j)
+							! Low p limit Lindeman
+							kbstab_low(i) = kbstab_low(i) + k0_m3_per_s*transition_matrix(j, a)*equilibrium_constants_m3(j)
+						end if
+					end do
+				krec3 = krec3 + Covalent_All(i) * kbstab(i)
+				krec3_low_p_lim = krec3_low_p_lim + kbstab_low(i)
+				end if
+			end do
+				
+!			print *,'krec from Lindeman on each processor:', krec3
+
+			allocate(krec3_Lindeman_collected(1, pe_num))
+				allocate(krec3_Lindeman_low_p_lim_collected(1, pe_num))
+			call MPI_GATHER(krec3, 1, MPI_REAL8, krec3_Lindeman_collected, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)			
+				call MPI_GATHER(krec3_low_p_lim, 1, MPI_REAL8, krec3_Lindeman_low_p_lim_collected, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+			call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
+			
+			if (myid .eq. 0) then
+				krec3_Lindeman = sum(krec3_Lindeman_collected)
+				krec3_Lindeman_low_p_lim_final = sum(krec3_Lindeman_low_p_lim_collected)
+			end if
+
+			call MPI_BCAST(krec3_Lindeman, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+			call MPI_BCAST(krec3_Lindeman_low_p_lim_final, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+			
+			if (myid .eq. 0) then
+				print *,'krec from Lindeman final from all processors, 3rd order:', krec3_Lindeman	
+				print *,'krec from Lindeman low p limit final from all processors, 3rd order:', krec3_Lindeman_low_p_lim_final	
+			end if
+			
+! High pressure limit from Lindeman krec
+			do i = 1, num_states
+				krec3_high_p_lim = krec3_high_p_lim + kdecs_per_s(i)*equilibrium_constants_m3(i)
+			end do
+			if (myid .eq. 0) print *, 'High p limit krec, 2nd order:', krec3_high_p_lim
+
 ! Scaling of the matrices
 	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
-!	truncated_matrix = truncated_matrix * k0_m3_per_s * M_per_m3
 
 ! Compute sum of rows in the transition matrix
 	allocate(sum_rows(num_states))
 	allocate(sum_rows_truncated(num_states))
 	sum_rows = 0
 	sum_rows_truncated = 0
-!	do i = 1, num_states
-!		do j = 1, num_states
-!				sum_rows(i) = sum_rows(i) + transition_matrix(i, j)
-!				sum_rows_truncated(i) = sum_rows_truncated(i) + truncated_matrix(i, j)
-!		end do
-!	end do
 
-!	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-!	   a = i - myid*chunk_size
 	do i = myid+1, num_states, pe_num
 	   a = (i - (myid+1))/pe_num + 1
 	   if (i > num_states) exit
@@ -868,12 +882,6 @@ PROGRAM RK_Solution
 	   end do
 !	   write(myid*1000+1, *) i, sum_rows(i)		   
 	end do
-
-!	do i = 1, chunk_size
-!	   do j = 1, num_states
-!		sum_rows(i) = sum_rows(i) + transition_matrix(i, j)
-!	   end do
-!	end do
 	
 !  Compute Constant terms for Master-equations
 	allocate(First_term(num_states))
@@ -885,8 +893,6 @@ PROGRAM RK_Solution
 !		Second_term_truncated(i) = kdecs_per_s(i) + sum_rows_truncated(i)
 	end do
 	
-!	do i = myid*chunk_size+1, myid*chunk_size+chunk_size
-!		a = i - myid*chunk_size
 	Second_term = 0
 	do i = myid+1, num_states, pe_num
 	   a = (i - (myid+1))/pe_num + 1
@@ -1009,7 +1015,7 @@ PROGRAM RK_Solution
 !					 if (myid == 0) write(4000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12,1x,E19.12)')  myid+1, t, i, C(i), dCdt(i), k_rec
 !				  end do 
 !			  end if		  
-			  if (iteration_counter == 100) stop 		  
+			  if (iteration_counter == 5) goto 15		  
 			  
 ! Solve the differential equation using rk4 subroutine and update variables
 			  call rk4(C, dCdt, num_states, t, h, Cout, derivs)
@@ -1050,7 +1056,7 @@ PROGRAM RK_Solution
 			  
 	end do
 	
-	close(junit)
+15	close(junit)
 	close(nunit)
 	close(munit)
 	
@@ -1059,6 +1065,19 @@ PROGRAM RK_Solution
 	
 	call cpu_time(end_time)
 	if (myid == 0) write(*, *) "CPU Time:", end_time-start_time, "seconds"
+
+	if (myid == 0) then
+		allocate(C_JK(barrier_rows, barrier_columns))
+		C_JK = 0
+		do j = 1, num_states
+			C_JK(K_value(j)+1, J_value(j)+1) = C_JK(K_value(j)+1, J_value(j)+1) + C(j)
+		end do	
+			open(newunit=lunit, file='JKdistribution_of_concs.txt', status='replace')
+				do i=1, maxval(K_value)+1
+					write(lunit, '(65(1x,E21.14))') C_JK(i, :)
+				end do
+			close(lunit)
+	end if
 
 	call MPI_Finalize(ierr_a)
 ! Main part of the code ends here
@@ -1248,7 +1267,7 @@ PROGRAM RK_Solution
 				matrix_tmp = ptran * exp((Energies(j) - Energies(i)) / dE_down) * exp(-abs(J_rot(j)-J_rot(i))/dJ)
 				if (matrix_tmp > kij_min) matrix(j, a) = matrix_tmp
 			  else
-				matrix_tmp = ptran * exp((Energies(i) - Energies(j)) / dE_down)&
+				matrix_tmp = ptran * exp((Energies(i) - Energies(j)) / dE_down) &
 				* exp(-abs(J_rot(j)-J_rot(i))/dJ) * eq_concs(i)/eq_concs(j)
 				if (matrix_tmp > kij_min* eq_concs(i)/eq_concs(j)) matrix(j, a) = matrix_tmp
 !			 	dE_up = get_dE_up(dE_down, temp_k, Energies(j), Energies(i), equilibrium_constants_m3(j), equilibrium_constants_m3(i))				
