@@ -32,20 +32,23 @@ PROGRAM RK_Solution
 	
 	real*8, dimension(:), allocatable :: Energies, Gammas, Covalent_All, Vdw_All, &
 	Infinity_All, equilibrium_constants_m3, eq_concs
-	real*8, dimension(:, :), allocatable :: truncated_matrix, weights_2D, krec3_Lindeman_collected, krec3_Lindeman_low_p_lim_collected
+	real*8, dimension(:, :), allocatable :: truncated_matrix, weights_2D, Lindeman_ratio_2D, &
+	krec3_Lindeman_collected, krec3_Lindeman_low_p_lim_collected
 	real*8, dimension(:, :), allocatable :: transition_matrix, Second_term_2d, symmetric_matrix
 	real*8, dimension(:, :, :), allocatable :: transition_matrix_3D
 	integer, dimension(:, :), allocatable :: state_pointer, C_JK
 	real*8, dimension(:), allocatable :: First_term, Second_term, Second_term_truncated, sum_rows, &
 	threshold_Energies_K, sum_rows_truncated, Second_term_main, First_term_myid,&
-	Second_term_myid, weights, kbstab, kstab, weights_Lindeman, kbstab_low
+	Second_term_myid, weights, Lindeman_ratio, kbstab, kstab, kstab_cov, weights_Lindeman, Lindeman_ratio_final, kbstab_low
 	real*8 :: h_j_per_s, hbar_js, c_cm_per_s, C_O_per_m3, C_O2_per_m3, temp_k
 	real*8 :: part_funcs_o2_per_m3, krec3_Lindeman, krec3_Lindeman_low_p_lim_final
 	character(len=3) :: o3_molecule
     character(len=2) :: o2_molecule, o_atom
 	integer :: J_rot_start
-	real*8 :: m_per_a0, j_per_k, j_per_cm, cm_per_k, kt_energy_cm, M_per_m3, ref_pressure_per_m3, pressure_ratio
-	real*8 :: k0_m3_per_s, sigma0_m2, pi, localization_prob_cov, localization_prob_vdw, krec3_high_p_lim, krec3_low_p_lim
+	real*8 :: m_per_a0, j_per_k, j_per_cm, cm_per_k, kt_energy_cm, M_per_m3, &
+	M_per_m3_Lindeman_first, M_per_m3_Lindeman_last, M_per_m3_Lindeman, &
+	ref_pressure_per_m3, pressure_ratio
+	real*8 :: k0_m3_per_s, sigma0_m2, pi, localization_prob_cov, localization_prob_vdw, krec2_high_p_lim, krec3_low_p_lim
 	real*8, dimension(2) :: dE
 	real*8 :: C_init, C_tot, dCdt_tot, K_eqs_tot, threshold_E, krec3
 	real*8 :: Energy_tmp, Total_Gamma_tmp, Covalent_All_tmp, Vdw_All_tmp, Infinity_All_tmp
@@ -108,7 +111,7 @@ PROGRAM RK_Solution
 ! Gas Mixture Parameters for reagents and bath gas	
 	C_O_per_m3 = 6.44e+18
 	C_O2_per_m3 = 6.44e+20
-	M_per_m3 = 1*6.44e+24
+	M_per_m3 = 1*6.44e+23
 	C_initial_O3_per_m3 = 0 ! 9999 !82510272735.4575
 	
 ! Pressure related parameters
@@ -145,26 +148,43 @@ PROGRAM RK_Solution
 ! Initial and final time and time step
 	t0 = 0.0d0
 ! 0.01*1000e-9 / pressure_ratio = 1e-12 in case of 10000std of M_per_m3
-	if ((M_per_m3 == 1*6.44e+24) .or. (M_per_m3 == 10*6.44e+24) .or. (M_per_m3 == 100*6.44e+24)) then
-		t_final = 15e-12 !135e-14 ! 1.35*0.01*1000e-9 / pressure_ratio
-		h = 9e-16 !4*100e-20 !0.001*1e-13! 1*1e-9 / (pressure_ratio)
+!	t_final = 15e-12 !135e-14 ! 1.35*0.01*1000e-9 / pressure_ratio
+!	h = 9e-16 !4*100e-20 !0.001*1e-13! 1*1e-9 / (pressure_ratio)
+	if (M_per_m3 == 1*6.44e+23) then
+		t_final = 15e-12
+		h = 9e-16
 	else
-		if (M_per_m3 == 1000*6.44e+24) then
-			t_final = 5e-12
-			h = 5e-16
+		if (M_per_m3 == 1*6.44e+24) then
+			t_final = 15e-12
+			h = 9e-16
 		else
-			if (M_per_m3 == 10000*6.44e+24) then
-				t_final = 1e-12
-				h = 7e-17
+			if (M_per_m3 == 10*6.44e+24) then
+				t_final = 10e-12
+				h = 9e-16
 			else
-				if (M_per_m3 == 100000*6.44e+24) then
-					t_final = 1e-13
-					h = 8e-18
+				if (M_per_m3 == 100*6.44e+24) then
+					t_final = 5e-12
+					h = 9e-16
+				else
+					if (M_per_m3 == 1000*6.44e+24) then
+						t_final = 5e-12
+						h = 5e-16
+					else
+						if (M_per_m3 == 10000*6.44e+24) then
+							t_final = 1e-12
+							h = 7e-17
+						else
+							if (M_per_m3 == 100000*6.44e+24) then
+								t_final = 1e-13
+								h = 8e-18
+							endif
+						endif
+					endif
 				endif
 			endif
 		endif
 	endif
-			
+		
 	band_width = 10
 	print_freq = 1
 	
@@ -172,24 +192,24 @@ PROGRAM RK_Solution
 	print_detail = .False.
 	truncation = .False.
 	print_transition_matrix = .False.
-	up_to_twenty_K_cells = .False.
 	writing_processors_load = .False.
 	
-	kij_min = 1.d-3 ! 0.1
+	kij_min = 1.d-3
 
 ! Specify the directory and file name  
 	filename = "state_properties.fwc"
 
 	num_states = 0	
-	J_initial = 24
-	J_final = 24
-	K_exact = 2
-	K_initial = 2
-	
-	K_step = 1
-	K_final_last = 20
-	vib_sym_well_start = 0
-	vib_sym_well_last = 0
+	J_initial = 16
+	J_final = 26
+	up_to_twenty_K_cells = .True.	
+	K_exact = 20
+	K_initial = 0
+		vib_sym_well_start = 0
+		vib_sym_well_last = 1
+		
+		K_step = 1
+		K_final_last = 20
 	
 	allocate(num_states_J_K_sym(J_final+1, K_final_last+1, vib_sym_well_last+1))
 	num_states_J_K_sym = 0
@@ -776,94 +796,144 @@ PROGRAM RK_Solution
 		end if
 		
 ! Calculating krec from Lindeman mechanism
-! Weights are calculated by each processor at this point
-			allocate(weights(num_states))
-			allocate(kstab(num_states))
-			weights = 0
-			kstab = 0
-			do j = myid+1, num_states, pe_num
-				a = (j - (myid+1))/pe_num + 1
-				if (j > num_states) exit
-				if (Resonance(j) == 1) then
-					do i = 1, num_states
-						if (Resonance(i) == 0) then
-							kstab(j) = kstab(j) + transition_matrix(i, a)*(equilibrium_constants_m3(i)/equilibrium_constants_m3(j))
-						end if
-					end do
-				weights(j) = kdecs_per_s(j) / (kdecs_per_s(j) + M_per_m3 * k0_m3_per_s * kstab(j))
-				end if
-			end do
+	allocate(weights(num_states))
+	allocate(kstab(num_states))
+	allocate(kstab_cov(num_states))
+	allocate(Lindeman_ratio(num_states))
+ 	allocate(weights_2D(num_states, pe_num))
+	allocate(Lindeman_ratio_2D(num_states, pe_num))
+	allocate(weights_Lindeman(num_states))
+	allocate(Lindeman_ratio_final(num_states))
+	allocate(kbstab(num_states))
+	allocate(kbstab_low(num_states))
+	allocate(krec3_Lindeman_collected(1, pe_num))
+	allocate(krec3_Lindeman_low_p_lim_collected(1, pe_num))	
 
-				
-			allocate(weights_2D(num_states, pe_num))
-			call MPI_GATHER(weights, num_states, MPI_REAL8, weights_2D, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)			
-			call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
-			
-			allocate(weights_Lindeman(num_states))			
-			if (myid == 0 ) then
-				do i = 1, num_states
-					do j = 1, pe_num
-						if (weights_2D(i,j)==0) cycle
-						weights_Lindeman(i) = weights_2D(i, j)
-!							write(1000, '(I8, 1x, E20.12)') counter, dCdt(counter)
-					end do
-				 end do
-90		 	end if 
-			call MPI_BCAST(weights_Lindeman, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
-			
-!			if (myid .eq. 1) then
-!				do j = 1, num_states
-!					print *, j , weights_Lindeman(j)
-!				end do
-!			endif
+	M_per_m3_Lindeman_first = 6.44e17
+	M_per_m3_Lindeman_last = 6.44e35 !6.44e28
+	M_per_m3_Lindeman = M_per_m3_Lindeman_first
+
+				! Lindeman loop starts
+					do while(M_per_m3_Lindeman <= M_per_m3_Lindeman_last) 
+					! Weights are calculated by each processor at this point
+							kstab = 0
+							kstab_cov = 0
+							weights = 0
+							Lindeman_ratio = 0
+							do j = myid+1, num_states, pe_num
+								a = (j - (myid+1))/pe_num + 1
+								if (j > num_states) exit
+								if (Resonance(j) == 1) then
+										do i = 1, num_states
+											if (Resonance(i) == 0) then
+												kstab(j) = kstab(j) + k0_m3_per_s * transition_matrix(i, a)*(equilibrium_constants_m3(i)/equilibrium_constants_m3(j))
+												kstab_cov(j) = kstab_cov(j) + &
+												Covalent_All(i) * k0_m3_per_s * transition_matrix(i, a)*(equilibrium_constants_m3(i)/equilibrium_constants_m3(j))
+											end if
+										end do
+									weights(j) = kdecs_per_s(j) / (kdecs_per_s(j) + M_per_m3_Lindeman * kstab(j))
+									if (kstab(j) > 0) then
+										Lindeman_ratio(j) = kstab_cov(j) / kstab(j)
+									end if
+								end if
+							end do
+
+							call MPI_GATHER(weights, num_states, MPI_REAL8, weights_2D, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)	
+							call MPI_GATHER(Lindeman_ratio, num_states, MPI_REAL8, Lindeman_ratio_2D, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)										
+							call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
+							
+							if (myid == 0 ) then
+								do i = 1, num_states
+									do j = 1, pe_num
+										if (weights_2D(i,j)==0) cycle
+										weights_Lindeman(i) = weights_2D(i, j)
+										if (Lindeman_ratio_2D(i, j)==0) cycle
+										Lindeman_ratio_final(i) = Lindeman_ratio_2D(i, j)
+!											write(1000, '(I8, 1x, E20.12)') i, Lindeman_ratio_final(i)
+									end do
+								 end do
+				90		 	end if
+
+							call MPI_BCAST(weights_Lindeman, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+							call MPI_BCAST(Lindeman_ratio_final, num_states, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+							call MPI_BARRIER(MPI_COMM_WORLD, ierr_a)
+							
+				!			if (myid .eq. 0) then
+				!				do j = 1, num_states
+				!					print *, j , weights_Lindeman(j)
+				!				end do
+				!			endif
+													
+							krec3 = 0
+							kbstab = 0
+							kbstab_low = 0
+							krec3_low_p_lim = 0
+							do i = myid+1, num_states, pe_num
+								a = (i - (myid+1))/pe_num + 1
+								if (i > num_states) exit						
+								if (Resonance(i) == 0) then
+									do j = 1, num_states
+										if (Resonance(j) == 1) then
+											kbstab(i) = kbstab(i) + k0_m3_per_s* transition_matrix(j, a)&
+											* weights_Lindeman(j) * equilibrium_constants_m3(j)
+											! Low p limit Lindeman
+											kbstab_low(i) = kbstab_low(i) + k0_m3_per_s*transition_matrix(j, a)*equilibrium_constants_m3(j)
+										end if
+									end do
+								krec3 = krec3 + Covalent_All(i) * kbstab(i)
+								krec3_low_p_lim = krec3_low_p_lim + Covalent_All(i) * kbstab_low(i)
+								end if
+							end do
+								
+				!			print *,'krec from Lindeman on each processor:', krec3			
+							call MPI_GATHER(krec3, 1, MPI_REAL8, krec3_Lindeman_collected, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)			
+							call MPI_GATHER(krec3_low_p_lim, 1, MPI_REAL8, krec3_Lindeman_low_p_lim_collected, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+							call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
+							
+							if (myid .eq. 0) then
+								krec3_Lindeman = sum(krec3_Lindeman_collected)
+								krec3_Lindeman_low_p_lim_final = sum(krec3_Lindeman_low_p_lim_collected)
+							end if
+							krec3_Lindeman_collected = 0
+							krec3_Lindeman_low_p_lim_collected = 0
+							
+							call MPI_BCAST(krec3_Lindeman, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+							call MPI_BCAST(krec3_Lindeman_low_p_lim_final, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
+							call MPI_BARRIER(MPI_COMM_WORLD, ierr_a)
 									
-			allocate(kbstab(num_states))
-			allocate(kbstab_low(num_states))
-			krec3 = 0
-			kbstab = 0
-			do i = myid+1, num_states, pe_num
-				a = (i - (myid+1))/pe_num + 1
-				if (i > num_states) exit						
-				if (Resonance(i) == 0) then
-					do j = 1, num_states
-						if (Resonance(j) == 1) then
-							kbstab(i) = kbstab(i) + k0_m3_per_s* transition_matrix(j, a)&
-							* weights_Lindeman(j) * equilibrium_constants_m3(j)
-							! Low p limit Lindeman
-							kbstab_low(i) = kbstab_low(i) + k0_m3_per_s*transition_matrix(j, a)*equilibrium_constants_m3(j)
-						end if
+							if (myid .eq. 0) then
+								open(unit=1, file='krec_Lindeman_3rd_order.txt', position='append')
+				!					write(1, *) 'krec from Lindeman final from all processors(3rd order), pressure:', krec3_Lindeman, M_per_m3_Lindeman
+									write(1, *) krec3_Lindeman, M_per_m3_Lindeman
+								close(1)
+								
+								open(unit=2, file='krec_Lindeman_low_p_3rd_order.txt', position='append')				
+				!					write(2, *) 'krec from Lindeman low p limit final from all processors(3rd order), pressure:', krec3_Lindeman_low_p_lim_final, M_per_m3_Lindeman	
+									write(2, *) krec3_Lindeman_low_p_lim_final, M_per_m3_Lindeman	
+								close(2)
+							end if
+							krec3_Lindeman = 0
+							krec3_Lindeman_low_p_lim_final = 0
+							
+				! High pressure limit from Lindeman krec
+							krec2_high_p_lim = 0
+!							if (myid .eq. 0) then
+							do i = 1, num_states
+								if (Resonance(i) == 1) then
+									krec2_high_p_lim = krec2_high_p_lim + kdecs_per_s(i)*equilibrium_constants_m3(i)*Lindeman_ratio_final(i)
+!									write(1000, '(I8, 1x, E20.12, 1x, E20.12)') i, weights_Lindeman(i), Lindeman_ratio_final(i)
+								end if
+							end do
+!							end if
+							if (myid .eq. 0) then
+								open(unit=3, file='krec_Lindeman_high_p_2nd_order.txt', position='append')								
+				!					write(3, *) 'High p limit krec(2nd order), M_per_m3:', krec2_high_p_lim, M_per_m3_Lindeman
+									write(3, *) krec2_high_p_lim, M_per_m3_Lindeman
+								close(3)
+							end if
+							M_per_m3_Lindeman = M_per_m3_Lindeman * 10
 					end do
-				krec3 = krec3 + Covalent_All(i) * kbstab(i)
-				krec3_low_p_lim = krec3_low_p_lim + kbstab_low(i)
-				end if
-			end do
-				
-!			print *,'krec from Lindeman on each processor:', krec3
-
-			allocate(krec3_Lindeman_collected(1, pe_num))
-				allocate(krec3_Lindeman_low_p_lim_collected(1, pe_num))
-			call MPI_GATHER(krec3, 1, MPI_REAL8, krec3_Lindeman_collected, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)			
-				call MPI_GATHER(krec3_low_p_lim, 1, MPI_REAL8, krec3_Lindeman_low_p_lim_collected, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
-			call MPI_BARRIER( MPI_COMM_WORLD, ierr_a )
-			
-			if (myid .eq. 0) then
-				krec3_Lindeman = sum(krec3_Lindeman_collected)
-				krec3_Lindeman_low_p_lim_final = sum(krec3_Lindeman_low_p_lim_collected)
-			end if
-
-			call MPI_BCAST(krec3_Lindeman, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
-			call MPI_BCAST(krec3_Lindeman_low_p_lim_final, 1, MPI_REAL8, 0, MPI_COMM_WORLD, ierr_a)
-			
-			if (myid .eq. 0) then
-				print *,'krec from Lindeman final from all processors, 3rd order:', krec3_Lindeman	
-				print *,'krec from Lindeman low p limit final from all processors, 3rd order:', krec3_Lindeman_low_p_lim_final	
-			end if
-			
-! High pressure limit from Lindeman krec
-			do i = 1, num_states
-				krec3_high_p_lim = krec3_high_p_lim + kdecs_per_s(i)*equilibrium_constants_m3(i)
-			end do
-			if (myid .eq. 0) print *, 'High p limit krec, 2nd order:', krec3_high_p_lim
+				! 	End of Lindeman loop
 
 ! Scaling of the matrices
 	transition_matrix = transition_matrix * k0_m3_per_s * M_per_m3
@@ -943,7 +1013,8 @@ PROGRAM RK_Solution
 	dCdt_tot = 0
 		do  i = 1, num_states
 		   C_tot = C_tot + C(i)
-		   dCdt_tot = dCdt_tot + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
+!		   dCdt_tot = dCdt_tot + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
+		   dCdt_tot = dCdt_tot + (Covalent_All(i))*dCdt(i)
 		end do
 	k_rec = dCdt_tot / (M_per_m3*(C_O_per_m3*C_O2_per_m3 - C_tot/K_eqs_tot))
 	
@@ -1015,7 +1086,7 @@ PROGRAM RK_Solution
 !					 if (myid == 0) write(4000, '(I8,1x,E20.12,1x,I8,1x,E20.12,1x,E20.12,1x,E19.12)')  myid+1, t, i, C(i), dCdt(i), k_rec
 !				  end do 
 !			  end if		  
-			  if (iteration_counter == 5) goto 15		  
+!			  if (iteration_counter == 100) goto 15	  
 			  
 ! Solve the differential equation using rk4 subroutine and update variables
 			  call rk4(C, dCdt, num_states, t, h, Cout, derivs)
@@ -1034,9 +1105,9 @@ PROGRAM RK_Solution
 				  dCdt_tot = 0
 				  do  i = 1, num_states
 					C_tot = C_tot + C(i)
-					dCdt_tot = dCdt_tot + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
+!					dCdt_tot = dCdt_tot + (Covalent_All(i) + Vdw_All(i))*dCdt(i)
+					dCdt_tot = dCdt_tot + (Covalent_All(i))*dCdt(i)
 				  end do
-				  
 				  k_rec = dCdt_tot / (M_per_m3*(C_O_per_m3*C_O2_per_m3 - C_tot/K_eqs_tot))
 ! Separate derivatives over K blocks after propagation 	  
 				  dCdt_separate = 0
@@ -1267,8 +1338,8 @@ PROGRAM RK_Solution
 				matrix_tmp = ptran * exp((Energies(j) - Energies(i)) / dE_down) * exp(-abs(J_rot(j)-J_rot(i))/dJ)
 				if (matrix_tmp > kij_min) matrix(j, a) = matrix_tmp
 			  else
-				matrix_tmp = ptran * exp((Energies(i) - Energies(j)) / dE_down) &
-				* exp(-abs(J_rot(j)-J_rot(i))/dJ) * eq_concs(i)/eq_concs(j)
+				matrix_tmp = ptran * exp((Energies(i) - Energies(j)) / dE_down) * exp(-abs(J_rot(j)-J_rot(i))/dJ)&
+				* eq_concs(i)/eq_concs(j)
 				if (matrix_tmp > kij_min* eq_concs(i)/eq_concs(j)) matrix(j, a) = matrix_tmp
 !			 	dE_up = get_dE_up(dE_down, temp_k, Energies(j), Energies(i), equilibrium_constants_m3(j), equilibrium_constants_m3(i))				
 !				matrix(j, a) = ptran * exp((Energies(i) - Energies(j)) / dE_up)
